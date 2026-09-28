@@ -1,3 +1,14 @@
+/* ---------- Fuentes ---------- */
+
+/* Ranade (Indian Type Foundry, gratis vía fontshare.com). Se guarda en /fonts para que ande offline. */
+@font-face {
+  font-family: 'Ranade';
+  src: url('../fonts/ranade-700.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ---------- Tokens ---------- */
 
 :root {
@@ -14,9 +25,11 @@
   --on-accent: #000000;
   --accent-soft: rgba(255, 255, 255, 0.08);
   --danger: #ff6b6b;
+  --go: #4ade80; /* fin del descanso */
   --radius: 14px;
   --radius-sm: 10px;
   --shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  --font-brand: 'Ranade', Georgia, serif;
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
@@ -133,9 +146,10 @@ p {
   display: flex;
   align-items: center;
   gap: 10px;
+  font-family: var(--font-brand);
   font-size: 20px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .brand-mark {
@@ -922,4 +936,222 @@ input:focus {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* ---------- Menú del inicio ---------- */
+
+.brand {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- Grupos propios y orden de la rutina ---------- */
+
+.chip-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.chip-add svg {
+  width: 16px;
+  height: 16px;
+}
+
+.add-group {
+  margin-top: 12px;
+}
+
+.order-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.order-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 4px 4px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.order-num {
+  width: 22px;
+  text-align: center;
+  font-weight: 800;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.order-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  font-weight: 500;
+}
+
+.order-name small {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.order-item .icon-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.order-item .icon-btn:disabled {
+  opacity: 0.25;
+}
+
+/* ---------- Temporizador de descanso ---------- */
+
+.rest-bar {
+  position: fixed;
+  top: env(safe-area-inset-top);
+  left: 0;
+  right: 0;
+  height: 4px;
+  z-index: 50;
+  background: var(--surface-2);
+}
+
+.rest-bar[hidden] {
+  display: none;
+}
+
+.rest-fill {
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left;
+  transform: scaleX(0);
+}
+
+.rest-bar.over .rest-fill {
+  background: var(--go);
+  transform: scaleX(1);
+  animation: none !important;
+}
+
+@keyframes rest-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.rest-text.over {
+  color: var(--go);
+  font-weight: 700;
+}
+
+/* ---------- Título de ejercicio → progreso ---------- */
+
+.ex-title-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 18px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.ex-title-btn svg {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+
+/* ---------- Progreso ---------- */
+
+.progress-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 12px 14px 16px;
+  text-align: left;
+  border-radius: var(--radius);
+}
+
+.progress-item:active {
+  background: var(--surface-2);
+}
+
+.progress-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.progress-item > svg {
+  color: var(--muted);
+}
+
+.chart-card {
+  padding: 14px 12px 8px;
+}
+
+.chart-title {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 4px 6px;
+}
+
+.chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  fill: none;
+  stroke: none;
+}
+
+.chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+.chart-line {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.chart-dot {
+  fill: var(--bg);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.chart-dot.last {
+  fill: var(--accent);
+}
+
+.chart-label {
+  fill: var(--muted);
+  stroke: none;
+  font-size: 11px;
+  font-family: var(--font);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-value {
+  text-align: center;
 }

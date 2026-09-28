@@ -17,7 +17,3 @@ export const SEED_EXERCISES = {
   hombro: ['Press militar', 'Elevaciones laterales', 'Elevaciones frontales', 'Pájaros (deltoides posterior)'],
   piernas: ['Sentadilla', 'Prensa', 'Peso muerto rumano', 'Extensión de cuádriceps', 'Curl femoral', 'Gemelos'],
 };
-
-export function groupLabel(id) {
-  return GROUPS.find((g) => g.id === id)?.label ?? id;
-}

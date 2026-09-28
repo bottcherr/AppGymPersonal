@@ -6,12 +6,24 @@
 //   workouts:  [{ id, routineId, routineName, startedAt, finishedAt,
 //                 sets: [{ exerciseId, set, reps, weight }] }]
 //   active:    entrenamiento en curso (o null), para no perder nada si se cierra la app.
+//              active.rest = { startedAt, endsAt } mientras corre un descanso.
+//   settings:  { restSeconds }
+//   customGroups: [{ id, label, custom }]  grupos musculares creados por el usuario
 
 import { GROUPS, SEED_EXERCISES } from './data.js';
 
 const KEY = 'appgym.v1';
 
-let state = load();
+const DEFAULT_SETTINGS = { restSeconds: 90 };
+
+let state = normalize(load());
+
+/** Completa campos que agregamos en versiones nuevas, para datos guardados con versiones viejas. */
+function normalize(s) {
+  s.settings = { ...DEFAULT_SETTINGS, ...(s.settings || {}) };
+  s.customGroups ??= [];
+  return s;
+}
 
 export function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -60,6 +72,61 @@ function save() {
 
 export function lastSaveFailed() {
   return saveFailed;
+}
+
+// ---------- Ajustes ----------
+
+export function settings() {
+  return state.settings;
+}
+
+export function updateSettings(patch) {
+  Object.assign(state.settings, patch);
+  save();
+}
+
+// ---------- Backup ----------
+
+export function exportData() {
+  return { app: 'appgym', exportedAt: new Date().toISOString(), data: state };
+}
+
+/** Devuelve los datos si el objeto parece un backup válido, o null. */
+export function parseBackup(obj) {
+  const data = obj?.data ?? obj;
+  const ok =
+    data && Array.isArray(data.exercises) && Array.isArray(data.routines) && Array.isArray(data.workouts);
+  return ok ? data : null;
+}
+
+/** Reemplaza todos los datos por los del backup. */
+export function importData(data) {
+  state = normalize(JSON.parse(JSON.stringify(data)));
+  state.active ??= null;
+  save();
+}
+
+// ---------- Grupos musculares ----------
+
+/** Grupos fijos + los creados por el usuario. */
+export function groups() {
+  return [...GROUPS, ...state.customGroups];
+}
+
+export function groupLabel(id) {
+  return groups().find((g) => g.id === id)?.label ?? id;
+}
+
+/** Crea un grupo propio (o devuelve el existente si ya hay uno con ese nombre). */
+export function addGroup(label) {
+  const clean = label.trim().replace(/\s+/g, ' ');
+  if (!clean) return null;
+  const existing = groups().find((g) => slug(g.label) === slug(clean));
+  if (existing) return existing;
+  const group = { id: `g-${uid()}`, label: clean, custom: true };
+  state.customGroups.push(group);
+  save();
+  return group;
 }
 
 // ---------- Ejercicios ----------
@@ -122,6 +189,28 @@ export function lastPerformance(exerciseId) {
     if (sets.length) return sets;
   }
   return null;
+}
+
+/** Todas las sesiones de un ejercicio, de la más vieja a la más nueva: [{ workoutId, date, sets }]. */
+export function exerciseHistory(exerciseId) {
+  const out = [];
+  for (const w of state.workouts) {
+    const sets = w.sets.filter((s) => s.exerciseId === exerciseId);
+    if (sets.length) out.push({ workoutId: w.id, date: w.startedAt, sets });
+  }
+  return out;
+}
+
+/** Ejercicios que se hicieron al menos una vez, del más reciente al más viejo. */
+export function exercisesWithHistory() {
+  const lastDate = new Map();
+  for (const w of state.workouts) {
+    for (const s of w.sets) lastDate.set(s.exerciseId, w.startedAt);
+  }
+  return [...lastDate]
+    .map(([id, date]) => ({ exercise: exercise(id), lastDate: date }))
+    .filter((x) => x.exercise)
+    .sort((a, b) => b.lastDate - a.lastDate);
 }
 
 export function lastWorkoutOf(routineId) {
