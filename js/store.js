@@ -8,7 +8,7 @@
 //                 sets: [{ exerciseId, set, reps, weight }] }]
 //   active:    entrenamiento en curso (o null), para no perder nada si se cierra la app.
 //              active.rest = { startedAt, endsAt } mientras corre un descanso.
-//   settings:  { restSeconds }
+//   settings:  { restSeconds, lastBackupAt?, backupSnoozedAt? }
 //   customGroups: [{ id, label, custom }]  grupos musculares creados por el usuario
 
 import { GROUPS, SEED_EXERCISES, slug, seedId } from './data.js';
@@ -226,6 +226,77 @@ export function workout(id) {
   return state.workouts.find((w) => w.id === id);
 }
 
+export function deleteWorkout(id) {
+  state.workouts = state.workouts.filter((w) => w.id !== id);
+  save();
+}
+
+/** Corrige una serie ya guardada. field: 'weight' | 'reps'. Valor vacío en peso = sin peso. */
+export function updateWorkoutSet(workoutId, index, field, value) {
+  const s = workout(workoutId)?.sets[index];
+  if (!s) return;
+  const n = toNumber(value);
+  if (field === 'weight') s.weight = n;
+  else if (n != null) s.reps = n;
+  save();
+}
+
+/** Borra una serie guardada. Si el entrenamiento queda vacío, se borra entero. Devuelve true si se borró todo. */
+export function removeWorkoutSet(workoutId, index) {
+  const w = workout(workoutId);
+  if (!w) return true;
+  w.sets.splice(index, 1);
+  if (!w.sets.length) {
+    deleteWorkout(workoutId);
+    return true;
+  }
+  save();
+  return false;
+}
+
+/**
+ * ¿Esta serie supera tu mejor marca en el ejercicio? Más peso que nunca, o el mismo peso con más reps.
+ * Sin peso (peso corporal): más reps que nunca. `extra` = series ya hechas hoy, que también cuentan.
+ * La primera vez que hacés un ejercicio no cuenta como récord.
+ */
+export function isRecord(exerciseId, weight, reps, extra = []) {
+  const past = [...state.workouts.flatMap((w) => w.sets.filter((s) => s.exerciseId === exerciseId)), ...extra];
+  if (!past.length || !(reps > 0)) return false;
+  if (weight == null) {
+    if (past.some((s) => s.weight != null)) return false;
+    return reps > Math.max(...past.map((s) => s.reps));
+  }
+  const best = Math.max(...past.map((s) => s.weight ?? 0));
+  if (weight > best) return true;
+  if (weight < best) return false;
+  return reps > Math.max(...past.filter((s) => s.weight === best).map((s) => s.reps));
+}
+
+// ---------- Recordatorio de backup ----------
+
+const BACKUP_EVERY = 14 * 86400000; // cada 2 semanas
+const SNOOZE = 7 * 86400000; // "más tarde" = una semana
+
+export function markBackup() {
+  state.settings.lastBackupAt = Date.now();
+  save();
+}
+
+export function snoozeBackupReminder() {
+  state.settings.backupSnoozedAt = Date.now();
+  save();
+}
+
+/** Días sin backup si ya toca recordarlo, o null. Solo si hay entrenamientos que perder. */
+export function backupReminderDays() {
+  if (!state.workouts.length) return null;
+  const now = Date.now();
+  const since = state.settings.lastBackupAt ?? Math.min(...state.workouts.map((w) => w.startedAt));
+  if (now - since < BACKUP_EVERY) return null;
+  if (state.settings.backupSnoozedAt && now - state.settings.backupSnoozedAt < SNOOZE) return null;
+  return Math.floor((now - since) / 86400000);
+}
+
 // ---------- Entrenamiento en curso ----------
 
 export function active() {
@@ -308,6 +379,7 @@ export function finishWorkout() {
         set: i + 1,
         reps: toNumber(s.reps) ?? 0,
         weight: toNumber(s.weight),
+        ...(s.pr ? { pr: true } : {}),
       });
     });
   }

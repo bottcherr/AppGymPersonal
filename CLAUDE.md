@@ -20,10 +20,12 @@ Datos en `localStorage` (clave `appgym.v1`), por dispositivo. No hay servidor.
 - `index.html` — punto de entrada; `<dialog id="sheet">` se usa para menús y confirmaciones.
 - `css/styles.css` — todo el estilo. Colores como variables en `:root` (tema oscuro fijo). `--go` = verde de fin de descanso.
 - `js/app.js` — pantallas y router por hash: `#/`, `#/rutina/nueva`, `#/rutina/:id/editar`, `#/entrenar`,
-  `#/resumen/:id`, `#/progreso`, `#/ejercicio/:id`, `#/generar`. Cada `render*()` reemplaza `root.innerHTML`
+  `#/resumen/:id`, `#/progreso` (pestañas Ejercicios/Entrenamientos), `#/ejercicio/:id`, `#/generar`,
+  `#/entrenamiento/:id` (entrenamiento pasado: corregir series, borrarlas o borrar el entrenamiento). Cada `render*()` reemplaza `root.innerHTML`
   y asigna `root.onclick/oninput/onsubmit` (delegación con `data-action`).
 - `js/store.js` — única capa que toca `localStorage`. `normalize()` migra datos viejos (ajustes, grupos propios,
   ejercicios recomendados nuevos). El entrenamiento en curso vive en `state.active` y se guarda en cada cambio.
+  También: `isRecord()` (récords personales), `backupReminderDays()` (aviso de backup cada 14 días, "más tarde" = 7 días).
 - `js/data.js` — grupos, **zonas por músculo** (`MUSCLES`, con `max` para zonas chicas), ejercicios recomendados
   (con `muscle` y `compound`), y clasificación de ejercicios propios por palabras clave (`muscleOf`, `isCompound`).
 - `js/generator.js` — "Rutina para hoy": reglas locales, **sin IA ni azar** (el azar solo con `variety` en
@@ -36,7 +38,7 @@ Datos en `localStorage` (clave `appgym.v1`), por dispositivo. No hay servidor.
 
 - Ítem de rutina: `{ exerciseId, sets, reps, repsPerSet? }`. `repsPerSet` (ej. `[12,10,8]`) manda sobre sets/reps.
 - Entrenamiento guardado: `{ id, routineId, routineName, startedAt, finishedAt, sets: [{ exerciseId, set, reps, weight }] }`.
-  Solo se guardan las series marcadas como hechas. `weight` puede ser `null` (peso corporal).
+  Solo se guardan las series marcadas como hechas. `weight` puede ser `null` (peso corporal). `pr: true` = récord.
 - `active.rest = { startedAt, endsAt, notified }` durante un descanso. `active.restSeconds` = descanso propio de una
   rutina generada (el ajuste "Sin descanso" siempre manda).
 
@@ -63,3 +65,7 @@ Datos en `localStorage` (clave `appgym.v1`), por dispositivo. No hay servidor.
 - Calculadora de discos, registro de esfuerzo (RPE), etiquetas por disciplina, sincronización con servidor.
 - "Compartir rutina" para pasar una sola rutina a otra persona sin reemplazar todos sus datos.
 - Que el generador pese más lo reciente que lo viejo del historial.
+- Notas por ejercicio (ej. "asiento en posición 4") y constancia semanal en el inicio.
+
+Ya hechas: historial con corregir/borrar, récords (🏆), sugerencia de progresión ("↑ 62,5 kg" si la última vez
+completó todas las series: +2,5 kg, o +1 kg en pesos < 20), recordatorio de backup.

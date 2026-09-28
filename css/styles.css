@@ -1465,3 +1465,110 @@ input:focus {
   text-decoration-color: var(--border);
   text-underline-offset: 4px;
 }
+
+/* ---------- Aviso de backup ---------- */
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 4px 8px 14px;
+  border-radius: var(--radius);
+  border: 1px dashed var(--border);
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.notice-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.notice-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.notice-close {
+  width: 36px;
+  height: 36px;
+  color: var(--muted);
+}
+
+.notice-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ---------- Última vez + sugerencia de progresión ---------- */
+
+.last-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.last-row .last-btn {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.up-btn {
+  flex-shrink: 0;
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--go) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--go) 40%, transparent);
+  color: var(--go);
+  font-weight: 700;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.up-btn:active {
+  background: color-mix(in srgb, var(--go) 24%, transparent);
+}
+
+/* ---------- Récords ---------- */
+
+.hero-pr {
+  margin-top: 10px !important;
+  color: var(--text) !important;
+  font-weight: 700;
+}
+
+.pill-pr {
+  background: color-mix(in srgb, var(--go) 16%, transparent);
+  color: var(--text);
+}
+
+/* ---------- Entrenamiento pasado ---------- */
+
+.hint-left {
+  text-align: left;
+  padding: 0 0 12px;
+  font-size: 14px;
+}
+
+.remove-btn {
+  color: var(--muted);
+}
+
+.remove-btn svg {
+  stroke-width: 2.2;
+  width: 18px;
+  height: 18px;
+}
+
+.content > .segmented {
+  margin: 4px 0 14px;
+}

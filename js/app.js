@@ -7,6 +7,7 @@
 //   #/progreso             ejercicios con historial
 //   #/ejercicio/:id        evolución de un ejercicio
 //   #/generar              rutina para hoy (generada automáticamente)
+//   #/entrenamiento/:id    entrenamiento pasado (corregir o borrar)
 
 import * as store from './store.js';
 import { generatePlan, INTENSITIES, DURATIONS } from './generator.js';
@@ -205,6 +206,8 @@ let timerId = null;
 function route() {
   clearInterval(timerId);
   if (sheet.open) sheet.close();
+  root.onchange = null;
+  root.onfocusin = null;
   const parts = location.hash.slice(1).split('/').filter(Boolean);
 
   if (parts[0] === 'rutina' && parts[1] === 'nueva') openEditor(null);
@@ -214,6 +217,7 @@ function route() {
   else if (parts[0] === 'progreso') renderProgress();
   else if (parts[0] === 'ejercicio') renderExercise(parts[1]);
   else if (parts[0] === 'generar') openGenerator();
+  else if (parts[0] === 'entrenamiento') renderPastWorkout(parts[1]);
   else renderHome();
 
   window.scrollTo(0, 0);
@@ -249,7 +253,10 @@ function exportBackup() {
   // En el celular, abrir "Compartir" para guardarlo en Archivos, Drive, WhatsApp, etc.
   const isTouch = matchMedia('(pointer: coarse)').matches;
   if (isTouch && navigator.canShare?.({ files: [file] })) {
-    navigator.share({ files: [file], title: 'Backup App Gym' }).catch(() => {});
+    navigator
+      .share({ files: [file], title: 'Backup App Gym' })
+      .then(backupDone)
+      .catch(() => {}); // cancelado: no cuenta como backup
     return;
   }
   const url = URL.createObjectURL(file);
@@ -261,6 +268,13 @@ function exportBackup() {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   toast('Backup descargado');
+  backupDone();
+}
+
+function backupDone() {
+  store.markBackup();
+  // Si estaba el aviso en el inicio, sacarlo.
+  if (!location.hash.slice(1).replace(/^\//, '')) renderHome();
 }
 
 function importBackup() {
@@ -321,6 +335,16 @@ function renderHome() {
         </span>
         <span class="resume-cta">Continuar</span>
       </button>`;
+  }
+
+  const backupDays = store.backupReminderDays();
+  if (backupDays != null) {
+    banner += `
+      <div class="notice">
+        <span class="notice-text">Hace ${backupDays} días que no hacés un backup de tus datos.</span>
+        <button class="notice-btn" data-action="backup-now">Exportar</button>
+        <button class="icon-btn notice-close" data-action="backup-later" aria-label="Recordar más tarde">${ICONS.close}</button>
+      </div>`;
   }
 
   let body;
@@ -392,6 +416,11 @@ function renderHome() {
         return navigate('/generar');
       case 'start':
         return startRoutine(id);
+      case 'backup-now':
+        return exportBackup();
+      case 'backup-later':
+        store.snoozeBackupReminder();
+        return renderHome();
       case 'app-menu':
         return openSheet('Menú', [
           { label: 'Progreso', run: () => navigate('/progreso') },
@@ -997,6 +1026,20 @@ function renderWorkout() {
         const s = ex.sets[+btn.dataset.set];
         s.done = !s.done;
         if (s.done && !String(s.reps).trim()) s.reps = String(targetFor(ex, +btn.dataset.set));
+        s.pr = false;
+        if (s.done) {
+          // ¿Récord? Cuentan el historial y las otras series ya hechas hoy.
+          const today = ex.sets
+            .filter((o) => o !== s && o.done)
+            .map((o) => ({ weight: toNum(o.weight), reps: toNum(o.reps) ?? 0 }));
+          const weight = toNum(s.weight);
+          const reps = toNum(s.reps);
+          if (store.isRecord(ex.exerciseId, weight, reps, today)) {
+            s.pr = true;
+            toast(`🏆 Nuevo récord: ${fmtSet({ weight, reps })}`);
+            navigator.vibrate?.(80);
+          }
+        }
         store.persistActive();
         checkSave();
         replaceCard(a, exIndex);
@@ -1014,6 +1057,15 @@ function renderWorkout() {
         });
         store.persistActive();
         return replaceCard(a, exIndex);
+      }
+      case 'use-suggest': {
+        const w = btn.dataset.weight;
+        ex.sets.forEach((s) => {
+          if (!s.done) s.weight = w;
+        });
+        store.persistActive();
+        replaceCard(a, exIndex);
+        return toast(`Cargué ${fmtNumber(Number(w))} kg: la última vez completaste todas las series`);
       }
       case 'add-set': {
         const prev = ex.sets[ex.sets.length - 1];
@@ -1048,11 +1100,19 @@ function exerciseCard(a, i) {
   const last = store.lastPerformance(ex.exerciseId);
   const allDone = ex.sets.every((s) => s.done);
 
+  const next = last ? suggestNext(ex, last) : null;
   const lastHtml = last
-    ? `<button class="last-btn" data-action="use-last" data-ex="${i}">
-         <span>Última vez: <strong>${fmtSet(topSet(last))}</strong></span>
-         <span class="last-use">Usar</span>
-       </button>`
+    ? `<div class="last-row">
+         <button class="last-btn" data-action="use-last" data-ex="${i}">
+           <span>Última vez: <strong>${fmtSet(topSet(last))}</strong></span>
+           <span class="last-use">Usar</span>
+         </button>
+         ${
+           next != null
+             ? `<button class="up-btn" data-action="use-suggest" data-ex="${i}" data-weight="${next}" aria-label="Hoy probá ${fmtNumber(next)} kg">↑ ${fmtNumber(next)} kg</button>`
+             : ''
+         }
+       </div>`
     : '<div class="last-none">Primera vez con este ejercicio</div>';
 
   const rows = ex.sets
@@ -1061,7 +1121,7 @@ function exerciseCard(a, i) {
       const weightPh = ref?.weight != null ? fmtNumber(ref.weight) : 'kg';
       return `
       <div class="set-row${s.done ? ' done' : ''}">
-        <span class="set-num">${j + 1}</span>
+        <span class="set-num"${s.pr ? ' title="Récord"' : ''}>${s.pr ? '🏆' : j + 1}</span>
         <input class="num" inputmode="decimal" enterkeyhint="next" data-field="weight" data-ex="${i}" data-set="${j}"
           value="${esc(s.weight)}" placeholder="${esc(weightPh)}" aria-label="Peso serie ${j + 1} (kg)">
         <input class="num" inputmode="numeric" enterkeyhint="done" data-field="reps" data-ex="${i}" data-set="${j}"
@@ -1092,6 +1152,25 @@ function exerciseCard(a, i) {
         <button class="link-btn muted" data-action="remove-set" data-ex="${i}" ${ex.sets.length <= 1 ? 'disabled' : ''}>Quitar serie</button>
       </div>
     </article>`;
+}
+
+function toNum(value) {
+  const n = parseFloat(String(value ?? '').replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Progresión: si la última vez completaste todas las series con las reps objetivo,
+ * sugiere subir el peso (2,5 kg, o 1 kg en pesos chicos). Si no, null.
+ */
+function suggestNext(ex, last) {
+  if (last.length < ex.targetSets || last.some((s) => s.weight == null)) return null;
+  for (let j = 0; j < ex.targetSets; j++) {
+    if (last[j].reps < targetFor(ex, j)) return null;
+  }
+  const top = Math.max(...last.map((s) => s.weight));
+  if (!top) return null;
+  return top + (top >= 20 ? 2.5 : 1);
 }
 
 function replaceCard(a, i) {
@@ -1137,17 +1216,34 @@ async function finish(a) {
 
 // ---------- Resumen ----------
 
+function workoutStats(w) {
+  const volume = w.sets.reduce((sum, s) => sum + (s.weight ?? 0) * s.reps, 0);
+  return `
+    <div class="stats">
+      <div class="stat"><span class="stat-value">${fmtDuration(w.finishedAt - w.startedAt)}</span><span class="stat-label">Duración</span></div>
+      <div class="stat"><span class="stat-value">${w.sets.length}</span><span class="stat-label">Series</span></div>
+      <div class="stat"><span class="stat-value">${fmtNumber(Math.round(volume))}</span><span class="stat-label">kg totales</span></div>
+    </div>`;
+}
+
+/** Series agrupadas por ejercicio, guardando el índice original de cada una. */
+function setsByExercise(w) {
+  const map = new Map();
+  w.sets.forEach((s, index) => {
+    if (!map.has(s.exerciseId)) map.set(s.exerciseId, []);
+    map.get(s.exerciseId).push({ ...s, index });
+  });
+  return [...map];
+}
+
+function fmtWorkoutDate(ts) {
+  return new Date(ts).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
 function renderSummary(id) {
   const w = store.workout(id);
   if (!w) return navigate('/');
-
-  const volume = w.sets.reduce((sum, s) => sum + (s.weight ?? 0) * s.reps, 0);
-  const byExercise = new Map();
-  for (const s of w.sets) {
-    if (!byExercise.has(s.exerciseId)) byExercise.set(s.exerciseId, []);
-    byExercise.get(s.exerciseId).push(s);
-  }
-  const date = new Date(w.startedAt).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const records = w.sets.filter((s) => s.pr).length;
 
   root.innerHTML = `
     <header class="topbar"><h1 class="topbar-title">Resumen</h1></header>
@@ -1155,20 +1251,17 @@ function renderSummary(id) {
       <div class="hero">
         <div class="hero-check">${ICONS.check}</div>
         <h2>¡Entrenamiento completo!</h2>
-        <p>${esc(w.routineName)} · ${date}</p>
+        <p>${esc(w.routineName)} · ${fmtWorkoutDate(w.startedAt)}</p>
+        ${records ? `<p class="hero-pr">🏆 ${records === 1 ? '1 récord nuevo' : `${records} récords nuevos`}</p>` : ''}
       </div>
-      <div class="stats">
-        <div class="stat"><span class="stat-value">${fmtDuration(w.finishedAt - w.startedAt)}</span><span class="stat-label">Duración</span></div>
-        <div class="stat"><span class="stat-value">${w.sets.length}</span><span class="stat-label">Series</span></div>
-        <div class="stat"><span class="stat-value">${fmtNumber(Math.round(volume))}</span><span class="stat-label">kg totales</span></div>
-      </div>
+      ${workoutStats(w)}
       <ul class="summary-list">
-        ${[...byExercise]
+        ${setsByExercise(w)
           .map(
             ([exId, sets]) => `
           <li class="card summary-item">
             <span class="summary-name">${esc(store.exercise(exId)?.name ?? 'Ejercicio')}</span>
-            <span class="summary-sets">${sets.map((s) => `<span class="pill">${fmtSet(s)}</span>`).join('')}</span>
+            <span class="summary-sets">${sets.map((s) => `<span class="pill${s.pr ? ' pill-pr' : ''}">${s.pr ? '🏆 ' : ''}${fmtSet(s)}</span>`).join('')}</span>
           </li>`,
           )
           .join('')}
@@ -1180,6 +1273,90 @@ function renderSummary(id) {
   root.onsubmit = null;
   root.onclick = (e) => {
     if (e.target.closest('[data-action="home"]')) navigate('/');
+  };
+}
+
+// ---------- Entrenamiento pasado (ver, corregir, borrar) ----------
+
+function renderPastWorkout(id) {
+  const w = store.workout(id);
+  if (!w) return navigate('/progreso');
+
+  root.innerHTML = `
+    <header class="topbar">
+      <button class="icon-btn" data-action="back" aria-label="Volver">${ICONS.back}</button>
+      <div class="topbar-title">
+        <h1>${esc(w.routineName)}</h1>
+        <span class="topbar-sub">${fmtWorkoutDate(w.startedAt)}</span>
+      </div>
+    </header>
+    <main class="content">
+      ${workoutStats(w)}
+      <p class="hint hint-left">Tocá un número para corregirlo. Se guarda solo.</p>
+      ${setsByExercise(w)
+        .map(
+          ([exId, sets]) => `
+        <article class="card ex-card">
+          <h2 class="ex-title">${esc(store.exercise(exId)?.name ?? 'Ejercicio')}</h2>
+          <div class="sets">
+            <div class="set-row set-head" aria-hidden="true"><span>Serie</span><span>kg</span><span>Reps</span><span></span></div>
+            ${sets
+              .map(
+                (s, k) => `
+              <div class="set-row">
+                <span class="set-num">${s.pr ? '🏆' : k + 1}</span>
+                <input class="num" inputmode="decimal" data-edit="weight" data-index="${s.index}" value="${s.weight != null ? fmtNumber(s.weight) : ''}" placeholder="—" aria-label="Peso serie ${k + 1}">
+                <input class="num" inputmode="numeric" data-edit="reps" data-index="${s.index}" value="${s.reps}" aria-label="Repeticiones serie ${k + 1}">
+                <button class="check-btn remove-btn" data-action="remove-past-set" data-index="${s.index}" aria-label="Borrar serie ${k + 1}">${ICONS.close}</button>
+              </div>`,
+              )
+              .join('')}
+          </div>
+        </article>`,
+        )
+        .join('')}
+      <button class="btn btn-danger btn-block" data-action="delete-workout">${ICONS.trash}Eliminar entrenamiento</button>
+    </main>`;
+
+  root.onsubmit = null;
+  root.oninput = null;
+  // Guardar al salir del casillero (así no se recalcula nada mientras escribís).
+  root.onchange = (e) => {
+    const el = e.target;
+    if (!el.dataset.edit) return;
+    store.updateWorkoutSet(w.id, +el.dataset.index, el.dataset.edit, el.value);
+    checkSave();
+    toast('Corregido');
+  };
+  root.onclick = async (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    switch (btn.dataset.action) {
+      case 'back':
+        return goBack();
+      case 'remove-past-set': {
+        const ok = await ask('¿Borrar esta serie del entrenamiento?', { ok: 'Borrar serie', danger: true });
+        if (!ok) return;
+        const gone = store.removeWorkoutSet(w.id, +btn.dataset.index);
+        checkSave();
+        if (gone) {
+          toast('Entrenamiento eliminado');
+          return navigate('/progreso');
+        }
+        return rerenderKeepingScroll(() => renderPastWorkout(id));
+      }
+      case 'delete-workout': {
+        const ok = await ask('¿Eliminar este entrenamiento? Se borra del historial y de tu progreso.', {
+          ok: 'Eliminar entrenamiento',
+          danger: true,
+        });
+        if (!ok) return;
+        store.deleteWorkout(w.id);
+        checkSave();
+        toast('Entrenamiento eliminado');
+        return navigate('/progreso');
+      }
+    }
   };
 }
 
@@ -1340,10 +1517,43 @@ function regenerate(variety = 0) {
 
 // ---------- Progreso ----------
 
+let progressTab = 'exercises'; // 'exercises' | 'workouts'
+
 function renderProgress() {
   const list = store.exercisesWithHistory();
+  const workouts = [...store.workouts()].sort((a, b) => b.startedAt - a.startedAt);
 
-  const body = list.length
+  const tabs = list.length
+    ? segmented(
+        'tab',
+        { exercises: { label: 'Ejercicios' }, workouts: { label: 'Entrenamientos' } },
+        progressTab,
+      )
+    : '';
+
+  const workoutsList = `
+    <ul class="routine-list">
+      ${workouts
+        .map((w) => {
+          const exercises = new Set(w.sets.map((s) => s.exerciseId)).size;
+          const records = w.sets.filter((s) => s.pr).length;
+          return `
+          <li class="card">
+            <button class="progress-item" data-action="open-workout" data-id="${w.id}">
+              <span class="progress-text">
+                <span class="routine-name">${esc(w.routineName)}</span>
+                <span class="routine-sub">${relativeDay(w.startedAt)} · ${exercises} ${exercises === 1 ? 'ejercicio' : 'ejercicios'} · ${w.sets.length} series${
+                  records ? ` · 🏆 ${records}` : ''
+                }</span>
+              </span>
+              ${ICONS.chevron}
+            </button>
+          </li>`;
+        })
+        .join('')}
+    </ul>`;
+
+  const exercisesList = list.length
     ? `<ul class="routine-list">
         ${list
           .map(({ exercise: ex, lastDate }) => {
@@ -1372,15 +1582,27 @@ function renderProgress() {
       <button class="icon-btn" data-action="back" aria-label="Volver">${ICONS.back}</button>
       <h1 class="topbar-title">Progreso</h1>
     </header>
-    <main class="content">${body}</main>`;
+    <main class="content">
+      ${tabs}
+      ${list.length && progressTab === 'workouts' ? workoutsList : exercisesList}
+    </main>`;
 
   root.oninput = null;
   root.onsubmit = null;
   root.onclick = (e) => {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
-    if (btn.dataset.action === 'back') navigate('/');
-    if (btn.dataset.action === 'open') navigate(`/ejercicio/${btn.dataset.id}`);
+    switch (btn.dataset.action) {
+      case 'back':
+        return navigate('/');
+      case 'option':
+        progressTab = btn.dataset.value;
+        return renderProgress();
+      case 'open':
+        return navigate(`/ejercicio/${btn.dataset.id}`);
+      case 'open-workout':
+        return navigate(`/entrenamiento/${btn.dataset.id}`);
+    }
   };
 }
 

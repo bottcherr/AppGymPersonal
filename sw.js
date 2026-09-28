@@ -1,6 +1,6 @@
 // Service worker: guarda los archivos de la app para que abra sin conexión.
 // Al cambiar cualquier archivo de la app, subir la versión para que se actualice.
-const CACHE = 'appgym-v12';
+const CACHE = 'appgym-v13';
 
 const FILES = [
   './',
