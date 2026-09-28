@@ -6,10 +6,29 @@
 //   #/resumen/:workoutId   resumen al terminar
 //   #/progreso             ejercicios con historial
 //   #/ejercicio/:id        evolución de un ejercicio
+//   #/generar              rutina para hoy (generada automáticamente)
 
 import * as store from './store.js';
+import { generatePlan, INTENSITIES, DURATIONS } from './generator.js';
+import { muscleLabel } from './data.js';
 
 const groupLabel = (id) => store.groupLabel(id);
+
+/** "3 × 10", o "12/10/8" si cada serie tiene sus propias reps. */
+function fmtTarget(sets, reps, repsPerSet) {
+  return repsPerSet?.length ? repsPerSet.join('/') : `${sets} × ${reps}`;
+}
+
+/** Reps objetivo de la serie j de un ejercicio del entrenamiento. */
+function targetFor(ex, j) {
+  return ex.targetRepsPerSet?.[j] ?? ex.targetReps;
+}
+
+/** "Espalda · Amplitud", o solo el grupo si no se sabe la zona. */
+function exerciseZone(ex) {
+  const zone = muscleLabel(ex);
+  return zone ? `${groupLabel(ex?.group)} · ${zone}` : groupLabel(ex?.group);
+}
 
 const root = document.getElementById('app');
 const sheet = document.getElementById('sheet');
@@ -23,6 +42,8 @@ const ICONS = {
   plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   chevron: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>',
+  spark:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></svg>',
   up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
   down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg>',
   trash:
@@ -192,6 +213,7 @@ function route() {
   else if (parts[0] === 'resumen') renderSummary(parts[1]);
   else if (parts[0] === 'progreso') renderProgress();
   else if (parts[0] === 'ejercicio') renderExercise(parts[1]);
+  else if (parts[0] === 'generar') openGenerator();
   else renderHome();
 
   window.scrollTo(0, 0);
@@ -309,9 +331,18 @@ function renderHome() {
         <h2>Creá tu primera rutina</h2>
         <p>Elegí los grupos musculares, marcá los ejercicios y definí series y repeticiones.</p>
         <button class="btn btn-primary" data-action="new">${ICONS.plus}Crear rutina</button>
+        <button class="link-btn" data-action="generate">${ICONS.spark}O generá una automática</button>
       </div>`;
   } else {
     body = `
+      <button class="gen-card" data-action="generate">
+        <span class="gen-icon">${ICONS.spark}</span>
+        <span class="gen-text">
+          <strong>Rutina para hoy</strong>
+          <span>Armada según lo que venís entrenando</span>
+        </span>
+        ${ICONS.chevron}
+      </button>
       <h2 class="section-title">Tus rutinas</h2>
       <ul class="routine-list">
         ${routines
@@ -357,6 +388,8 @@ function renderHome() {
         return navigate('/rutina/nueva');
       case 'resume':
         return navigate('/entrenar');
+      case 'generate':
+        return navigate('/generar');
       case 'start':
         return startRoutine(id);
       case 'app-menu':
@@ -479,7 +512,7 @@ function renderEditor() {
                  return `
                  <li class="order-item">
                    <span class="order-num">${i + 1}</span>
-                   <span class="order-name">${esc(ex?.name ?? 'Ejercicio')}<small>${esc(groupLabel(ex?.group))}</small></span>
+                   <span class="order-name">${esc(ex?.name ?? 'Ejercicio')}<small>${esc(exerciseZone(ex))}</small></span>
                    <button class="icon-btn" data-action="move" data-index="${i}" data-delta="-1" aria-label="Subir" ${i === 0 ? 'disabled' : ''}>${ICONS.up}</button>
                    <button class="icon-btn" data-action="move" data-index="${i}" data-delta="1" aria-label="Bajar" ${i === draft.items.length - 1 ? 'disabled' : ''}>${ICONS.down}</button>
                  </li>`;
@@ -500,16 +533,32 @@ function renderEditor() {
           <li class="ex-item${sel ? ' selected' : ''}">
             <button class="ex-toggle" data-action="toggle-ex" data-id="${ex.id}" aria-pressed="${!!sel}">
               <span class="ex-check">${sel ? sel.order : ''}</span>
-              <span class="ex-name">${esc(ex.name)}</span>
+              <span class="ex-name">${esc(ex.name)}${muscleLabel(ex) ? `<small>${esc(muscleLabel(ex))}</small>` : ''}</span>
               ${ex.custom ? '<span class="tag">propio</span>' : ''}
             </button>
             ${
               sel
                 ? `<div class="targets">
                     ${stepper(ex.id, 'sets', 'Series', sel.sets)}
-                    <span class="times">×</span>
-                    ${stepper(ex.id, 'reps', 'Reps', sel.reps)}
-                  </div>`
+                    ${
+                      sel.repsPerSet
+                        ? `<div class="rps">
+                             <span class="stepper-label">Reps por serie</span>
+                             <div class="rps-row">
+                               ${sel.repsPerSet
+                                 .map(
+                                   (r, k) =>
+                                     `<input class="rps-input" inputmode="numeric" enterkeyhint="done" maxlength="3" data-rps="${ex.id}" data-k="${k}" value="${r}" aria-label="Reps serie ${k + 1}">`,
+                                 )
+                                 .join('<span class="rps-sep">/</span>')}
+                             </div>
+                           </div>`
+                        : `<span class="times">×</span>${stepper(ex.id, 'reps', 'Reps', sel.reps)}`
+                    }
+                  </div>
+                  <button class="link-btn rps-toggle" data-action="toggle-rps" data-id="${ex.id}">${
+                    sel.repsPerSet ? 'Mismas reps en todas las series' : 'Reps distintas por serie'
+                  }</button>`
                 : ''
             }
           </li>`;
@@ -563,10 +612,21 @@ function renderEditor() {
   if (addingTo || addingGroup) root.querySelector('.add-ex input')?.focus();
 
   root.oninput = (e) => {
-    if (e.target.id === 'rname') {
-      draft.name = e.target.value;
+    const el = e.target;
+    if (el.id === 'rname') {
+      draft.name = el.value;
       updateSaveButton();
+    } else if (el.dataset.rps) {
+      // Solo números; si queda vacío se guarda como está y se corrige al guardar la rutina.
+      el.value = el.value.replace(/\D/g, '');
+      const item = draft.items.find((it) => it.exerciseId === el.dataset.rps);
+      const n = parseInt(el.value, 10);
+      if (n > 0) item.repsPerSet[+el.dataset.k] = Math.min(100, n);
     }
+  };
+  // Al tocar un casillero de reps, se selecciona el número para reemplazarlo directo.
+  root.onfocusin = (e) => {
+    if (e.target.classList?.contains('rps-input')) e.target.select();
   };
 
   root.onsubmit = (e) => {
@@ -616,7 +676,26 @@ function renderEditor() {
         const field = btn.dataset.field;
         const max = field === 'sets' ? 20 : 100;
         item[field] = Math.min(max, Math.max(1, item[field] + Number(btn.dataset.delta)));
+        if (field === 'sets' && item.repsPerSet) {
+          // Sumar o quitar casilleros: la serie nueva copia las reps de la última.
+          while (item.repsPerSet.length < item.sets) item.repsPerSet.push(item.repsPerSet.at(-1));
+          item.repsPerSet.length = item.sets;
+          return rerenderKeepingScroll(renderEditor);
+        }
         root.querySelector(`[data-out="${field}-${item.exerciseId}"]`).textContent = item[field];
+        return;
+      }
+      case 'toggle-rps': {
+        const item = draft.items.find((it) => it.exerciseId === btn.dataset.id);
+        if (item.repsPerSet) {
+          item.reps = item.repsPerSet[0];
+          delete item.repsPerSet;
+        } else {
+          item.repsPerSet = Array(item.sets).fill(item.reps);
+        }
+        rerenderKeepingScroll(renderEditor);
+        // Dejar listo el primer casillero para escribir.
+        if (item.repsPerSet) root.querySelector(`[data-rps="${item.exerciseId}"]`)?.focus();
         return;
       }
       case 'add-ex':
@@ -684,7 +763,11 @@ function saveDraft() {
     id: draft.id || store.uid(),
     name: draft.name.trim(),
     groups: [...draft.groups].sort((a, b) => order.indexOf(a) - order.indexOf(b)),
-    items: draft.items,
+    items: draft.items.map((it) => {
+      if (!it.repsPerSet) return it;
+      // Con reps por serie: la cantidad de series sale de la lista, y "reps" queda como la primera.
+      return { ...it, sets: it.repsPerSet.length, reps: it.repsPerSet[0] };
+    }),
   });
   checkSave();
   toast('Rutina guardada');
@@ -703,13 +786,15 @@ let audioCtx = null;
 let restBeep = null; // sonido programado para el final del descanso
 
 function startRest(a) {
-  const secs = store.settings().restSeconds;
+  // "Sin descanso" en ajustes lo apaga siempre; si no, una rutina generada trae su propio descanso.
+  const setting = store.settings().restSeconds;
+  const secs = setting ? a.restSeconds ?? setting : 0;
   if (!secs) return;
   const now = Date.now();
   a.rest = { startedAt: now, endsAt: now + secs * 1000, notified: false };
   store.persistActive();
   scheduleBeep(secs);
-  renderRestBar(a);
+  renderRest(a);
 }
 
 function scheduleBeep(secs) {
@@ -748,22 +833,39 @@ function cancelBeep() {
   restBeep = null;
 }
 
-/** Dibuja la barra fina de arriba. Se llena con una animación CSS que dura lo que dura el descanso. */
-function renderRestBar(a) {
-  const bar = document.getElementById('rest-bar');
-  if (!bar) return;
-  const r = a.rest;
-  bar.hidden = !r;
-  if (!r) return;
-  const fill = bar.firstElementChild;
-  fill.style.animation = 'none';
-  void fill.offsetWidth; // reinicia la animación
-  fill.style.animation = `rest-fill ${r.endsAt - r.startedAt}ms linear ${r.startedAt - Date.now()}ms forwards`;
-  bar.classList.toggle('over', Date.now() >= r.endsAt);
-  updateRestText(a);
+const RING = 2 * Math.PI * 18; // largo del anillo (radio 18)
+
+function restIslandHtml() {
+  return `
+    <div class="rest-island" id="rest-island" hidden role="timer">
+      <svg class="rest-ring" viewBox="0 0 44 44" aria-hidden="true">
+        <circle class="rest-ring-track" cx="22" cy="22" r="18"/>
+        <circle class="rest-ring-fill" cx="22" cy="22" r="18" stroke-dasharray="${RING}"/>
+      </svg>
+      <div class="rest-info">
+        <span class="rest-time" id="rest-time"></span>
+        <span class="rest-label" id="rest-label"></span>
+      </div>
+      <button class="rest-btn" data-action="rest-add" aria-label="Sumar 15 segundos">+15</button>
+      <button class="rest-btn rest-close" data-action="rest-skip" aria-label="Saltar descanso">${ICONS.close}</button>
+    </div>`;
 }
 
-/** Se llama cada segundo mientras se entrena. */
+/** Muestra u oculta la isla. El anillo se vacía con una animación CSS que dura lo que dura el descanso. */
+function renderRest(a) {
+  const island = document.getElementById('rest-island');
+  if (!island) return;
+  const r = a.rest;
+  island.hidden = !r;
+  if (!r) return;
+  const fill = island.querySelector('.rest-ring-fill');
+  fill.style.animation = 'none';
+  void fill.getBoundingClientRect(); // reinicia la animación
+  fill.style.animation = `rest-ring ${r.endsAt - r.startedAt}ms linear ${r.startedAt - Date.now()}ms forwards`;
+  updateRestTime(a);
+}
+
+/** Se llama varias veces por segundo mientras se entrena. */
 function tickRest(a) {
   const r = a.rest;
   if (!r) return;
@@ -771,29 +873,55 @@ function tickRest(a) {
   if (now >= r.endsAt && !r.notified) {
     r.notified = true;
     store.persistActive();
-    document.getElementById('rest-bar')?.classList.add('over');
     navigator.vibrate?.([200, 100, 200]);
   }
-  // A los 20 s de terminado, la barra se va sola.
+  // A los 20 s de terminado, la isla se va sola.
   if (now >= r.endsAt + 20000) {
     a.rest = null;
     store.persistActive();
-    renderRestBar(a);
+    return renderRest(a);
   }
-  updateRestText(a);
+  updateRestTime(a);
 }
 
-function updateRestText(a) {
-  const el = document.getElementById('rest-text');
-  if (!el) return;
+function updateRestTime(a) {
+  const island = document.getElementById('rest-island');
   const r = a.rest;
-  if (!r) {
-    el.textContent = '';
-    return;
-  }
+  if (!island || !r) return;
   const left = r.endsAt - Date.now();
-  el.textContent = left > 0 ? ` · Descanso ${fmtElapsed(left + 999)}` : ' · ¡A entrenar!';
-  el.classList.toggle('over', left <= 0);
+  const over = left <= 0;
+  island.classList.toggle('over', over);
+  if (over) {
+    document.getElementById('rest-time').textContent = '¡A entrenar!';
+    document.getElementById('rest-label').textContent = 'Descanso terminado';
+  } else {
+    const secs = Math.ceil(left / 1000);
+    document.getElementById('rest-time').textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+    document.getElementById('rest-label').textContent = 'Descanso';
+  }
+}
+
+function extendRest(a, secs) {
+  const r = a.rest;
+  if (!r) return;
+  const now = Date.now();
+  if (now >= r.endsAt) {
+    r.startedAt = now;
+    r.endsAt = now + secs * 1000;
+  } else {
+    r.endsAt += secs * 1000;
+  }
+  r.notified = false;
+  store.persistActive();
+  scheduleBeep((r.endsAt - now) / 1000);
+  renderRest(a);
+}
+
+function skipRest(a) {
+  a.rest = null;
+  cancelBeep();
+  store.persistActive();
+  renderRest(a);
 }
 
 // ---------- Entrenar ----------
@@ -803,12 +931,12 @@ function renderWorkout() {
   if (!a) return navigate('/');
 
   root.innerHTML = `
-    <div class="rest-bar" id="rest-bar" hidden><div class="rest-fill"></div></div>
+    ${restIslandHtml()}
     <header class="topbar">
       <button class="icon-btn" data-action="home" aria-label="Volver al inicio">${ICONS.back}</button>
       <div class="topbar-title">
         <h1>${esc(a.routineName)}</h1>
-        <span class="topbar-sub"><span id="timer">${fmtElapsed(Date.now() - a.startedAt)}</span> · <span id="progress"></span><span id="rest-text" class="rest-text"></span></span>
+        <span class="topbar-sub"><span id="timer">${fmtElapsed(Date.now() - a.startedAt)}</span> · <span id="progress"></span></span>
       </div>
       <button class="icon-btn" data-action="workout-menu" aria-label="Opciones">${ICONS.dots}</button>
     </header>
@@ -818,12 +946,12 @@ function renderWorkout() {
     <div class="bottombar"><button class="btn btn-primary btn-block" data-action="finish">Terminar entrenamiento</button></div>`;
 
   updateProgress();
-  renderRestBar(a);
+  renderRest(a);
   timerId = setInterval(() => {
     const el = document.getElementById('timer');
     if (el) el.textContent = fmtElapsed(Date.now() - a.startedAt);
     tickRest(a);
-  }, 1000);
+  }, 250);
 
   root.onsubmit = null;
   root.oninput = (e) => {
@@ -843,22 +971,13 @@ function renderWorkout() {
         return navigate('/');
       case 'history':
         return navigate(`/ejercicio/${btn.dataset.id}`);
+      case 'rest-add':
+        return extendRest(a, 15);
+      case 'rest-skip':
+        return skipRest(a);
       case 'workout-menu':
         return openSheet(a.routineName, [
           { label: `Descanso entre series: ${fmtRest(store.settings().restSeconds)}`, run: chooseRest },
-          ...(a.rest
-            ? [
-                {
-                  label: 'Saltar descanso',
-                  run: () => {
-                    a.rest = null;
-                    cancelBeep();
-                    store.persistActive();
-                    renderRestBar(a);
-                  },
-                },
-              ]
-            : []),
           {
             label: 'Descartar entrenamiento',
             danger: true,
@@ -877,7 +996,7 @@ function renderWorkout() {
       case 'done': {
         const s = ex.sets[+btn.dataset.set];
         s.done = !s.done;
-        if (s.done && !String(s.reps).trim()) s.reps = String(ex.targetReps);
+        if (s.done && !String(s.reps).trim()) s.reps = String(targetFor(ex, +btn.dataset.set));
         store.persistActive();
         checkSave();
         replaceCard(a, exIndex);
@@ -946,7 +1065,7 @@ function exerciseCard(a, i) {
         <input class="num" inputmode="decimal" enterkeyhint="next" data-field="weight" data-ex="${i}" data-set="${j}"
           value="${esc(s.weight)}" placeholder="${esc(weightPh)}" aria-label="Peso serie ${j + 1} (kg)">
         <input class="num" inputmode="numeric" enterkeyhint="done" data-field="reps" data-ex="${i}" data-set="${j}"
-          value="${esc(s.reps)}" placeholder="${ex.targetReps}" aria-label="Repeticiones serie ${j + 1}">
+          value="${esc(s.reps)}" placeholder="${targetFor(ex, j)}" aria-label="Repeticiones serie ${j + 1}">
         <button class="check-btn" data-action="done" data-ex="${i}" data-set="${j}" aria-pressed="${s.done}"
           aria-label="Serie ${j + 1} hecha">${ICONS.check}</button>
       </div>`;
@@ -961,7 +1080,7 @@ function exerciseCard(a, i) {
             ${esc(info?.name ?? 'Ejercicio eliminado')}${ICONS.chevron}
           </button>
         </h2>
-        <span class="ex-target">${groupLabel(info?.group)} · ${ex.targetSets} × ${ex.targetReps}</span>
+        <span class="ex-target">${esc(exerciseZone(info))} · ${fmtTarget(ex.targetSets, ex.targetReps, ex.targetRepsPerSet)}</span>
       </div>
       ${lastHtml}
       <div class="sets">
@@ -1064,6 +1183,161 @@ function renderSummary(id) {
   };
 }
 
+// ---------- Rutina para hoy (generada) ----------
+
+const genOptions = { intensity: 'heavy', duration: 'medium', focus: [], rest: null }; // rest null = sugerido
+let plan = null;
+
+function openGenerator() {
+  plan = generatePlan(genOptions);
+  renderGenerator();
+}
+
+function segmented(name, options, current) {
+  return `
+    <div class="segmented" role="group">
+      ${Object.entries(options)
+        .map(
+          ([key, opt]) => `
+        <button class="seg-btn" data-action="option" data-name="${name}" data-value="${key}" aria-pressed="${key === current}">
+          <span>${opt.label}</span>${opt.hint ? `<small>${opt.hint}</small>` : ''}
+        </button>`,
+        )
+        .join('')}
+    </div>`;
+}
+
+function renderGenerator() {
+  const focusChips =
+    `<button class="chip" data-action="focus-auto" aria-pressed="${!genOptions.focus.length}">${ICONS.spark}Automático</button>` +
+    store
+      .groups()
+      .map(
+        (g) =>
+          `<button class="chip" data-action="focus" data-group="${g.id}" aria-pressed="${genOptions.focus.includes(g.id)}">${esc(g.label)}</button>`,
+      )
+      .join('');
+
+  const suggestedRest = INTENSITIES[genOptions.intensity].restSeconds;
+  const restChips =
+    `<button class="chip" data-action="rest-opt" data-value="" aria-pressed="${genOptions.rest == null}">Sugerido · ${fmtRest(suggestedRest)}</button>` +
+    REST_OPTIONS.filter((s) => s > 0)
+      .map(
+        (s) =>
+          `<button class="chip" data-action="rest-opt" data-value="${s}" aria-pressed="${genOptions.rest === s}">${fmtRest(s)}</button>`,
+      )
+      .join('');
+
+  root.innerHTML = `
+    <header class="topbar">
+      <button class="icon-btn" data-action="back" aria-label="Volver">${ICONS.back}</button>
+      <h1 class="topbar-title">Rutina para hoy</h1>
+    </header>
+    <main class="content">
+      <div class="field">
+        <span class="label">Intensidad</span>
+        ${segmented('intensity', INTENSITIES, genOptions.intensity)}
+      </div>
+      <div class="field">
+        <span class="label">Duración</span>
+        ${segmented('duration', DURATIONS, genOptions.duration)}
+      </div>
+      <div class="field">
+        <span class="label">Descanso entre series</span>
+        <div class="chips">${restChips}</div>
+      </div>
+      <div class="field">
+        <span class="label">Enfoque</span>
+        <div class="chips">${focusChips}</div>
+      </div>
+
+      <article class="card plan">
+        <p class="plan-reason">${ICONS.spark}<span>${esc(plan.reason)}</span></p>
+        <h2 class="plan-title">${esc(plan.name)}</h2>
+        <p class="plan-meta">${INTENSITIES[plan.intensity].label} · ≈ ${fmtDuration(plan.minutes * 60000)} · ${plan.items.length} ejercicios · descanso ${fmtRest(plan.restSeconds)}</p>
+        <ol class="plan-list">
+          ${plan.items
+            .map((it, i) => {
+              const ex = store.exercise(it.exerciseId);
+              return `
+              <li class="plan-item">
+                <span class="order-num">${i + 1}</span>
+                <span class="order-name">${esc(ex?.name ?? 'Ejercicio')}<small>${esc(exerciseZone(ex))}${
+                  it.weight != null ? ` · sugerido ${fmtNumber(it.weight)} kg` : ''
+                }</small></span>
+                <span class="plan-sets">${fmtTarget(it.sets, it.reps, it.repsPerSet)}</span>
+              </li>`;
+            })
+            .join('')}
+        </ol>
+        <button class="link-btn" data-action="save-plan">${ICONS.plus}Guardar como rutina</button>
+      </article>
+    </main>
+    <div class="bottombar bottombar-split">
+      <button class="btn btn-secondary" data-action="reroll">Otra opción</button>
+      <button class="btn btn-primary" data-action="start-plan">Empezar</button>
+    </div>`;
+
+  root.oninput = null;
+  root.onsubmit = null;
+  root.onclick = async (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    switch (btn.dataset.action) {
+      case 'back':
+        return navigate('/');
+      case 'option':
+        genOptions[btn.dataset.name] = btn.dataset.value;
+        return regenerate();
+      case 'focus-auto':
+        genOptions.focus = [];
+        return regenerate();
+      case 'rest-opt':
+        genOptions.rest = btn.dataset.value ? Number(btn.dataset.value) : null;
+        return regenerate();
+      case 'focus': {
+        const g = btn.dataset.group;
+        genOptions.focus = genOptions.focus.includes(g)
+          ? genOptions.focus.filter((x) => x !== g)
+          : [...genOptions.focus, g];
+        return regenerate();
+      }
+      case 'reroll':
+        regenerate(3);
+        return toast('Otra combinación, mismas zonas');
+      case 'save-plan':
+        store.saveRoutine({
+          id: store.uid(),
+          name: plan.name,
+          groups: plan.groups,
+          items: plan.items.map(({ exerciseId, sets, reps }) => ({ exerciseId, sets, reps })),
+        });
+        checkSave();
+        toast('Rutina guardada');
+        return navigate('/');
+      case 'start-plan': {
+        const a = store.active();
+        if (a) {
+          const ok = await ask(`Tenés un entrenamiento de "${a.routineName}" en curso. ¿Descartarlo y empezar este?`, {
+            ok: 'Descartar y empezar',
+            danger: true,
+          });
+          if (!ok) return;
+        }
+        store.startWorkoutFromPlan(plan);
+        checkSave();
+        return navigate('/entrenar');
+      }
+    }
+  };
+}
+
+/** variety > 0 cambia qué ejercicio va en cada zona; 0 da siempre la misma rutina para las mismas opciones. */
+function regenerate(variety = 0) {
+  plan = generatePlan({ ...genOptions, variety });
+  rerenderKeepingScroll(renderGenerator);
+}
+
 // ---------- Progreso ----------
 
 function renderProgress() {
@@ -1079,7 +1353,7 @@ function renderProgress() {
               <button class="progress-item" data-action="open" data-id="${ex.id}">
                 <span class="progress-text">
                   <span class="routine-name">${esc(ex.name)}</span>
-                  <span class="routine-sub">${esc(groupLabel(ex.group))} · Mejor: ${fmtSet(topSet(all))} · ${relativeDay(lastDate)}</span>
+                  <span class="routine-sub">${esc(exerciseZone(ex))} · Mejor: ${fmtSet(topSet(all))} · ${relativeDay(lastDate)}</span>
                 </span>
                 ${ICONS.chevron}
               </button>
@@ -1165,7 +1439,7 @@ function renderExercise(id) {
       <button class="icon-btn" data-action="back" aria-label="Volver">${ICONS.back}</button>
       <div class="topbar-title">
         <h1>${esc(info.name)}</h1>
-        <span class="topbar-sub">${esc(groupLabel(info.group))}</span>
+        <span class="topbar-sub">${esc(exerciseZone(info))}</span>
       </div>
     </header>
     <main class="content">${body}</main>`;

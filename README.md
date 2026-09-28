@@ -22,7 +22,7 @@ icons/                  Íconos (los PNG se generan con: node tools/make-icons.m
 ## Probarla en la compu
 
 ```bash
-python -m http.server 5173
+python tools/serve.py
 ```
 
 Y abrir http://localhost:5173 (F12 → ícono de celular para verla en tamaño teléfono).

@@ -1,6 +1,6 @@
 // Service worker: guarda los archivos de la app para que abra sin conexión.
 // Al cambiar cualquier archivo de la app, subir la versión para que se actualice.
-const CACHE = 'appgym-v5';
+const CACHE = 'appgym-v12';
 
 const FILES = [
   './',
@@ -9,6 +9,7 @@ const FILES = [
   './js/app.js',
   './js/store.js',
   './js/data.js',
+  './js/generator.js',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',
@@ -17,7 +18,10 @@ const FILES = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES)));
+  // cache: 'reload' = bajar cada archivo del servidor, no de lo que el navegador tenga guardado.
+  event.waitUntil(
+    caches.open(CACHE).then((cache) => cache.addAll(FILES.map((f) => new Request(f, { cache: 'reload' })))),
+  );
   self.skipWaiting();
 });
 
@@ -31,12 +35,15 @@ self.addEventListener('activate', (event) => {
 });
 
 // Primero la red (para recibir cambios), y si no hay conexión, lo guardado.
+// cache: 'no-cache' obliga a preguntarle al servidor si el archivo cambió, así nunca se mezclan
+// archivos nuevos con viejos guardados por el navegador.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  const sameOrigin = new URL(event.request.url).origin === location.origin;
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, sameOrigin ? { cache: 'no-cache' } : undefined)
       .then((response) => {
-        if (response.ok && new URL(event.request.url).origin === location.origin) {
+        if (response.ok && sameOrigin) {
           const copy = response.clone();
           caches.open(CACHE).then((cache) => cache.put(event.request, copy));
         }

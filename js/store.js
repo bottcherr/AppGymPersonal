@@ -2,7 +2,8 @@
 //
 // Forma del estado guardado:
 //   exercises: [{ id, name, group, custom }]
-//   routines:  [{ id, name, groups: [groupId], items: [{ exerciseId, sets, reps }] }]
+//   routines:  [{ id, name, groups: [groupId], items: [{ exerciseId, sets, reps, repsPerSet? }] }]
+//              repsPerSet (opcional): reps distintas por serie, ej. [12, 10, 8]
 //   workouts:  [{ id, routineId, routineName, startedAt, finishedAt,
 //                 sets: [{ exerciseId, set, reps, weight }] }]
 //   active:    entrenamiento en curso (o null), para no perder nada si se cierra la app.
@@ -10,7 +11,7 @@
 //   settings:  { restSeconds }
 //   customGroups: [{ id, label, custom }]  grupos musculares creados por el usuario
 
-import { GROUPS, SEED_EXERCISES } from './data.js';
+import { GROUPS, SEED_EXERCISES, slug, seedId } from './data.js';
 
 const KEY = 'appgym.v1';
 
@@ -22,30 +23,27 @@ let state = normalize(load());
 function normalize(s) {
   s.settings = { ...DEFAULT_SETTINGS, ...(s.settings || {}) };
   s.customGroups ??= [];
+  addMissingSeeds(s);
   return s;
+}
+
+/** Suma los ejercicios recomendados nuevos (si no hay ya uno propio con el mismo nombre). */
+function addMissingSeeds(s) {
+  for (const group of GROUPS) {
+    for (const { name } of SEED_EXERCISES[group.id]) {
+      const id = seedId(group.id, name);
+      const exists = s.exercises.some((e) => e.id === id || (e.group === group.id && slug(e.name) === slug(name)));
+      if (!exists) s.exercises.push({ id, name, group: group.id, custom: false });
+    }
+  }
 }
 
 export function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-function slug(text) {
-  return text
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '');
-}
-
 function initialState() {
-  const exercises = [];
-  for (const group of GROUPS) {
-    for (const name of SEED_EXERCISES[group.id]) {
-      exercises.push({ id: `${group.id}-${slug(name)}`, name, group: group.id, custom: false });
-    }
-  }
-  return { version: 1, exercises, routines: [], workouts: [], active: null };
+  return { version: 1, exercises: [], routines: [], workouts: [], active: null };
 }
 
 function load() {
@@ -191,6 +189,10 @@ export function lastPerformance(exerciseId) {
   return null;
 }
 
+export function workouts() {
+  return state.workouts;
+}
+
 /** Todas las sesiones de un ejercicio, de la más vieja a la más nueva: [{ workoutId, date, sets }]. */
 export function exerciseHistory(exerciseId) {
   const out = [];
@@ -230,18 +232,49 @@ export function active() {
   return state.active;
 }
 
+/**
+ * Arma un ejercicio del entrenamiento a partir de un ítem de rutina.
+ * item.repsPerSet (opcional) = reps distintas por serie, ej. [12, 10, 8]; si está, manda sobre sets/reps.
+ */
+function workoutExercise(item, weight = '') {
+  const per = item.repsPerSet?.length ? item.repsPerSet : null;
+  const count = per ? per.length : item.sets;
+  return {
+    exerciseId: item.exerciseId,
+    targetSets: count,
+    targetReps: item.reps,
+    targetRepsPerSet: per,
+    sets: Array.from({ length: count }, (_, j) => ({
+      weight,
+      reps: String(per ? per[j] : item.reps),
+      done: false,
+    })),
+  };
+}
+
 export function startWorkout(routineId) {
   const r = routine(routineId);
   state.active = {
     routineId: r.id,
     routineName: r.name,
     startedAt: Date.now(),
-    exercises: r.items.map((item) => ({
-      exerciseId: item.exerciseId,
-      targetSets: item.sets,
-      targetReps: item.reps,
-      sets: Array.from({ length: item.sets }, () => ({ weight: '', reps: String(item.reps), done: false })),
-    })),
+    exercises: r.items.map((item) => workoutExercise(item)),
+  };
+  save();
+  return state.active;
+}
+
+/**
+ * Empieza un entrenamiento desde una rutina generada (sin guardarla como rutina).
+ * plan: { name, restSeconds, items: [{ exerciseId, sets, reps, repsPerSet?, weight }] }
+ */
+export function startWorkoutFromPlan(plan) {
+  state.active = {
+    routineId: null,
+    routineName: plan.name,
+    startedAt: Date.now(),
+    restSeconds: plan.restSeconds,
+    exercises: plan.items.map((item) => workoutExercise(item, item.weight != null ? String(item.weight) : '')),
   };
   save();
   return state.active;

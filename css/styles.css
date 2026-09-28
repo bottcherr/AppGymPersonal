@@ -1014,47 +1014,135 @@ input:focus {
   opacity: 0.25;
 }
 
-/* ---------- Temporizador de descanso ---------- */
+/* ---------- Temporizador de descanso (isla flotante) ---------- */
 
-.rest-bar {
+.rest-island {
   position: fixed;
-  top: env(safe-area-inset-top);
-  left: 0;
-  right: 0;
-  height: 4px;
+  top: calc(env(safe-area-inset-top) + 64px);
+  left: 50%;
   z-index: 50;
-  background: var(--surface-2);
+  width: min(calc(100% - 32px), 380px);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px 10px 12px;
+  border-radius: 999px;
+  background: #0b0b0b;
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  transform: translateX(-50%);
+  animation: island-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
-.rest-bar[hidden] {
+.rest-island[hidden] {
   display: none;
 }
 
-.rest-fill {
-  height: 100%;
-  background: var(--accent);
-  transform-origin: left;
-  transform: scaleX(0);
-}
-
-.rest-bar.over .rest-fill {
-  background: var(--go);
-  transform: scaleX(1);
-  animation: none !important;
-}
-
-@keyframes rest-fill {
+@keyframes island-in {
   from {
-    transform: scaleX(0);
+    opacity: 0;
+    transform: translate(-50%, -16px) scale(0.92);
+  }
+}
+
+.rest-ring {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+}
+
+.rest-ring circle {
+  fill: none;
+  stroke-width: 4;
+}
+
+.rest-ring-track {
+  stroke: var(--surface-2);
+}
+
+.rest-ring-fill {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-dashoffset: 0;
+  transition: stroke 0.3s ease;
+}
+
+@keyframes rest-ring {
+  from {
+    stroke-dashoffset: 0;
   }
   to {
-    transform: scaleX(1);
+    stroke-dashoffset: 113.1;
   }
 }
 
-.rest-text.over {
-  color: var(--go);
+.rest-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.rest-time {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.rest-label {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.rest-btn {
+  display: grid;
+  place-items: center;
+  min-width: 48px;
+  height: 44px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--surface-2);
   font-weight: 700;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rest-btn:active {
+  background: var(--border);
+}
+
+.rest-close {
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.rest-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Terminó el descanso: todo en verde. */
+.rest-island.over {
+  border-color: color-mix(in srgb, var(--go) 60%, transparent);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7), 0 0 24px color-mix(in srgb, var(--go) 35%, transparent);
+}
+
+.rest-island.over .rest-ring-fill {
+  stroke: var(--go);
+  animation: none !important;
+  stroke-dashoffset: 0;
+}
+
+.rest-island.over .rest-time {
+  font-size: 22px;
+  color: var(--go);
 }
 
 /* ---------- Título de ejercicio → progreso ---------- */
@@ -1154,4 +1242,226 @@ input:focus {
 
 .stat-value {
   text-align: center;
+}
+
+/* ---------- Rutina para hoy ---------- */
+
+.gen-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 16px;
+  text-align: left;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, #1c1c1c, #0f0f0f);
+  border: 1px solid var(--border);
+}
+
+.gen-card:active {
+  background: var(--surface-2);
+}
+
+.gen-card > svg {
+  color: var(--muted);
+}
+
+.gen-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--on-accent);
+  flex-shrink: 0;
+}
+
+.gen-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.gen-text strong {
+  font-size: 17px;
+}
+
+.gen-text span {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.empty .link-btn {
+  margin-top: 4px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip svg {
+  width: 16px;
+  height: 16px;
+}
+
+.segmented {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.seg-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 6px 4px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--muted);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.seg-btn small {
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.seg-btn[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.plan {
+  padding: 18px 16px 8px;
+  margin-top: 8px;
+}
+
+.plan-reason {
+  display: flex;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.plan-reason svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent-text);
+  margin-top: 1px;
+}
+
+.plan-title {
+  font-size: 22px;
+  letter-spacing: -0.01em;
+}
+
+.plan-meta {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 4px 0 12px;
+}
+
+.plan-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.plan-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.plan-sets {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.btn-secondary {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.bottombar-split {
+  display: flex;
+  gap: 10px;
+}
+
+.bottombar-split .btn {
+  flex: 1;
+}
+
+/* Zona del músculo debajo del nombre del ejercicio (editor de rutina). */
+.ex-name small {
+  display: block;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* ---------- Reps distintas por serie (editor de rutina) ---------- */
+
+.targets {
+  flex-wrap: wrap;
+}
+
+.rps {
+  flex-basis: 100%; /* fila propia, debajo de "Series" */
+  min-width: 0;
+}
+
+.rps-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.rps-input {
+  width: 46px;
+  min-height: 40px;
+  padding: 0;
+  text-align: center;
+  font-weight: 700;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-2);
+  border-color: transparent;
+}
+
+.rps-input:focus {
+  border-color: var(--accent);
+}
+
+.rps-sep {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.rps-toggle {
+  min-height: 40px;
+  margin: -6px 0 6px 52px;
+  font-size: 15px;
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 4px;
 }
