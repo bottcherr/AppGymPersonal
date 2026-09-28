@@ -25,7 +25,9 @@ Datos en `localStorage` (clave `appgym.v1`), por dispositivo. No hay servidor.
   y asigna `root.onclick/oninput/onsubmit` (delegación con `data-action`).
 - `js/store.js` — única capa que toca `localStorage`. `normalize()` migra datos viejos (ajustes, grupos propios,
   ejercicios recomendados nuevos). El entrenamiento en curso vive en `state.active` y se guarda en cada cambio.
-  También: `isRecord()` (récords personales), `backupReminderDays()` (aviso de backup cada 14 días, "más tarde" = 7 días).
+  También: `isRecord()` (récords personales), `backupReminderDays()` (aviso de backup cada 14 días, "más tarde" = 7 días),
+  `setExerciseNote()` (nota fija por ejercicio), `exportRoutine()` / `importRoutine()` (compartir una rutina: va con
+  nombres y grupos porque los ids de ejercicios propios cambian entre celulares; importar agrega, no reemplaza).
 - `js/data.js` — grupos, **zonas por músculo** (`MUSCLES`, con `max` para zonas chicas), ejercicios recomendados
   (con `muscle` y `compound`), y clasificación de ejercicios propios por palabras clave (`muscleOf`, `isCompound`).
 - `js/generator.js` — "Rutina para hoy": reglas locales, **sin IA ni azar** (el azar solo con `variety` en
@@ -63,9 +65,10 @@ Datos en `localStorage` (clave `appgym.v1`), por dispositivo. No hay servidor.
 ## Ideas pendientes (de la spec y charlas)
 
 - Calculadora de discos, registro de esfuerzo (RPE), etiquetas por disciplina, sincronización con servidor.
-- "Compartir rutina" para pasar una sola rutina a otra persona sin reemplazar todos sus datos.
 - Que el generador pese más lo reciente que lo viejo del historial.
-- Notas por ejercicio (ej. "asiento en posición 4") y constancia semanal en el inicio.
+- Series por músculo en la semana + constancia; calentamiento sugerido (series de aproximación).
 
 Ya hechas: historial con corregir/borrar, récords (🏆), sugerencia de progresión ("↑ 62,5 kg" si la última vez
-completó todas las series: +2,5 kg, o +1 kg en pesos < 20), recordatorio de backup.
+completó todas las series: +2,5 kg, o +1 kg en pesos < 20), recordatorio de backup, ⋯ por ejercicio al entrenar
+(cambiar por otro de la misma zona — lo ya hecho queda con el original —, nota, ver progreso), compartir rutina
+(archivo .json por el menú de compartir; se importa desde ⋯ → "Importar backup o rutina").

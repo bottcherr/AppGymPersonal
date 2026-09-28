@@ -11,7 +11,7 @@
 
 import * as store from './store.js';
 import { generatePlan, INTENSITIES, DURATIONS } from './generator.js';
-import { muscleLabel } from './data.js';
+import { muscleLabel, muscleOf, slug } from './data.js';
 
 const groupLabel = (id) => store.groupLabel(id);
 
@@ -199,6 +199,41 @@ function ask(message, { ok = 'Aceptar', danger = false } = {}) {
   });
 }
 
+/** Pedir un texto corto en una hoja de la app. Devuelve el texto, o null si se canceló. */
+function promptText(title, { value = '', placeholder = '', ok = 'Guardar' } = {}) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      sheet.onclose = null;
+      if (sheet.open) sheet.close();
+      resolve(result);
+    };
+    sheet.innerHTML = `
+      <form class="sheet-body" method="dialog">
+        <p class="sheet-title">${esc(title)}</p>
+        <input name="text" value="${esc(value)}" placeholder="${esc(placeholder)}" maxlength="120" autocomplete="off" enterkeyhint="done">
+        <button class="sheet-btn" type="submit">${esc(ok)}</button>
+        <button class="sheet-btn cancel" type="button" data-answer="no">Cancelar</button>
+      </form>`;
+    const form = sheet.querySelector('form');
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      done(form.text.value);
+    };
+    sheet.onclick = (e) => {
+      if (e.target === sheet || e.target.closest('[data-answer="no"]')) done(null);
+    };
+    sheet.onclose = () => {
+      if (!sheet.open) done(null);
+    };
+    if (sheet.open) sheet.close();
+    sheet.showModal();
+    form.text.focus();
+  });
+}
+
 // ---------- Router ----------
 
 let timerId = null;
@@ -271,6 +306,29 @@ function exportBackup() {
   backupDone();
 }
 
+/** Compartir una rutina: archivo chiquito que el otro importa desde ⋯ → Importar. */
+function shareRoutine(id) {
+  const data = store.exportRoutine(id);
+  if (!data) return;
+  const name = `rutina-${slug(data.routine.name) || 'compartida'}.json`;
+  const file = new File([JSON.stringify(data)], name, { type: 'application/json' });
+  const text = `Rutina "${data.routine.name}" para App Gym Personal. Guardá el archivo y abrilo desde el menú ⋯ → Importar.`;
+  const isTouch = matchMedia('(pointer: coarse)').matches;
+  if (isTouch && navigator.canShare?.({ files: [file] })) {
+    navigator.share({ files: [file], title: `Rutina ${data.routine.name}`, text }).catch(() => {});
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast('Rutina descargada: mandale el archivo a quien quieras');
+}
+
 function backupDone() {
   store.markBackup();
   // Si estaba el aviso en el inicio, sacarlo.
@@ -287,13 +345,30 @@ function importBackup() {
     const file = input.files[0];
     input.remove();
     if (!file) return;
-    let data = null;
+    let obj = null;
     try {
-      data = store.parseBackup(JSON.parse(await file.text()));
+      obj = JSON.parse(await file.text());
     } catch {
-      data = null;
+      obj = null;
     }
-    if (!data) return toast('El archivo no es un backup válido');
+
+    // ¿Es una rutina compartida? Se agrega sin tocar nada más.
+    const shared = store.parseSharedRoutine(obj);
+    if (shared) {
+      const n = shared.items.length;
+      const ok = await ask(
+        `¿Agregar la rutina "${shared.name}" (${n} ${n === 1 ? 'ejercicio' : 'ejercicios'}) a tus rutinas? No se borra nada de lo tuyo.`,
+        { ok: 'Agregar rutina' },
+      );
+      if (!ok) return;
+      store.importRoutine(shared);
+      checkSave();
+      toast('Rutina agregada');
+      return navigate('/');
+    }
+
+    const data = store.parseBackup(obj);
+    if (!data) return toast('El archivo no es un backup ni una rutina');
     const ok = await ask(
       `Esto reemplaza tus datos actuales por los del backup (${data.routines.length} rutinas, ${data.workouts.length} entrenamientos). ¿Continuar?`,
       { ok: 'Importar', danger: true },
@@ -426,12 +501,13 @@ function renderHome() {
           { label: 'Progreso', run: () => navigate('/progreso') },
           { label: `Descanso entre series: ${fmtRest(store.settings().restSeconds)}`, run: chooseRest },
           { label: 'Exportar datos (backup)', run: exportBackup },
-          { label: 'Importar datos', run: importBackup },
+          { label: 'Importar backup o rutina', run: importBackup },
         ]);
       case 'routine-menu':
         return openSheet(store.routine(id).name, [
           { label: 'Empezar entrenamiento', run: () => startRoutine(id) },
           { label: 'Editar rutina', run: () => navigate(`/rutina/${id}/editar`) },
+          { label: 'Compartir rutina', run: () => shareRoutine(id) },
           {
             label: 'Eliminar rutina',
             danger: true,
@@ -956,6 +1032,7 @@ function skipRest(a) {
 // ---------- Entrenar ----------
 
 function renderWorkout() {
+  clearInterval(timerId); // por si se vuelve a dibujar sin pasar por el router
   const a = store.active();
   if (!a) return navigate('/');
 
@@ -1000,6 +1077,14 @@ function renderWorkout() {
         return navigate('/');
       case 'history':
         return navigate(`/ejercicio/${btn.dataset.id}`);
+      case 'ex-menu': {
+        const info = store.exercise(ex.exerciseId);
+        return openSheet(info?.name ?? 'Ejercicio', [
+          { label: 'Cambiar por otro ejercicio', run: () => chooseSwap(a, exIndex) },
+          { label: info?.note ? 'Editar nota' : 'Agregar nota', run: () => editNote(a, exIndex) },
+          { label: 'Ver progreso', run: () => navigate(`/ejercicio/${ex.exerciseId}`) },
+        ]);
+      }
       case 'rest-add':
         return extendRest(a, 15);
       case 'rest-skip':
@@ -1141,6 +1226,8 @@ function exerciseCard(a, i) {
           </button>
         </h2>
         <span class="ex-target">${esc(exerciseZone(info))} · ${fmtTarget(ex.targetSets, ex.targetReps, ex.targetRepsPerSet)}</span>
+        ${info?.note ? `<span class="ex-note">${esc(info.note)}</span>` : ''}
+        <button class="icon-btn ex-menu" data-action="ex-menu" data-ex="${i}" aria-label="Opciones de ${esc(info?.name ?? 'ejercicio')}">${ICONS.dots}</button>
       </div>
       ${lastHtml}
       <div class="sets">
@@ -1152,6 +1239,70 @@ function exerciseCard(a, i) {
         <button class="link-btn muted" data-action="remove-set" data-ex="${i}" ${ex.sets.length <= 1 ? 'disabled' : ''}>Quitar serie</button>
       </div>
     </article>`;
+}
+
+/** Nota fija del ejercicio: se ve cada vez que lo hacés. */
+async function editNote(a, i) {
+  const info = store.exercise(a.exercises[i].exerciseId);
+  if (!info) return;
+  const text = await promptText(`Nota para ${info.name}`, {
+    value: info.note ?? '',
+    placeholder: 'Ej: asiento en 4, agarre cerrado',
+  });
+  if (text == null) return;
+  store.setExerciseNote(info.id, text);
+  checkSave();
+  replaceCard(a, i);
+  toast(text.trim() ? 'Nota guardada' : 'Nota borrada');
+}
+
+/**
+ * Cambiar un ejercicio en el momento (máquina ocupada). Ofrece primero los de la misma zona.
+ * Si ya hay series hechas, esas quedan con el ejercicio original y las pendientes pasan al nuevo.
+ */
+function chooseSwap(a, i) {
+  const current = a.exercises[i];
+  const info = store.exercise(current.exerciseId);
+  if (!info) return;
+  const zone = muscleOf(info);
+  const inWorkout = new Set(a.exercises.map((e) => e.exerciseId));
+  const uses = (ex) => store.exerciseHistory(ex.id).length;
+  const candidates = store
+    .exercisesByGroup(info.group)
+    .filter((ex) => !inWorkout.has(ex.id))
+    .sort((x, y) => (muscleOf(y) === zone) - (muscleOf(x) === zone) || uses(y) - uses(x))
+    .slice(0, 6);
+  if (!candidates.length) return toast('No hay otros ejercicios de este grupo');
+
+  openSheet(
+    `Cambiar ${info.name}`,
+    candidates.map((ex) => ({
+      label: `${ex.name}${muscleLabel(ex) ? ` · ${muscleLabel(ex)}` : ''}`,
+      run: () => {
+        const done = current.sets.filter((s) => s.done);
+        const pending = current.sets
+          .filter((s) => !s.done)
+          .map((s) => ({ weight: '', reps: s.reps, done: false }));
+        const replacement = {
+          exerciseId: ex.id,
+          targetSets: current.targetSets,
+          targetReps: current.targetReps,
+          targetRepsPerSet: current.targetRepsPerSet,
+          sets: pending.length ? pending : [{ weight: '', reps: String(current.targetReps), done: false }],
+        };
+        if (done.length) {
+          current.sets = done; // lo hecho queda registrado con el ejercicio original
+          a.exercises.splice(i + 1, 0, replacement);
+        } else {
+          a.exercises[i] = replacement;
+        }
+        store.persistActive();
+        checkSave();
+        rerenderKeepingScroll(renderWorkout);
+        toast(`Cambiado por ${ex.name}`);
+      },
+    })),
+  );
 }
 
 function toNum(value) {
@@ -1664,7 +1815,7 @@ function renderExercise(id) {
         <span class="topbar-sub">${esc(exerciseZone(info))}</span>
       </div>
     </header>
-    <main class="content">${body}</main>`;
+    <main class="content">${info.note ? `<p class="ex-note ex-note-page">${esc(info.note)}</p>` : ''}${body}</main>`;
 
   root.oninput = null;
   root.onsubmit = null;

@@ -1,7 +1,7 @@
 // Capa de datos. Todo vive en localStorage, así la app funciona sin conexión.
 //
 // Forma del estado guardado:
-//   exercises: [{ id, name, group, custom }]
+//   exercises: [{ id, name, group, custom, note? }]
 //   routines:  [{ id, name, groups: [groupId], items: [{ exerciseId, sets, reps, repsPerSet? }] }]
 //              repsPerSet (opcional): reps distintas por serie, ej. [12, 10, 8]
 //   workouts:  [{ id, routineId, routineName, startedAt, finishedAt,
@@ -97,6 +97,74 @@ export function parseBackup(obj) {
   return ok ? data : null;
 }
 
+// ---------- Compartir una rutina ----------
+// Se exporta con nombres y grupos (no solo ids), porque los ejercicios propios tienen ids distintos en cada celular.
+
+export function exportRoutine(id) {
+  const r = routine(id);
+  if (!r) return null;
+  const items = r.items
+    .map((it) => {
+      const ex = exercise(it.exerciseId);
+      if (!ex) return null;
+      return {
+        exercise: { id: ex.id, name: ex.name, group: ex.group },
+        sets: it.sets,
+        reps: it.reps,
+        ...(it.repsPerSet ? { repsPerSet: [...it.repsPerSet] } : {}),
+      };
+    })
+    .filter(Boolean);
+  const groupIds = [...new Set([...r.groups, ...items.map((it) => it.exercise.group)])];
+  return {
+    app: 'appgym',
+    type: 'routine',
+    version: 1,
+    routine: {
+      name: r.name,
+      groups: groupIds.map((g) => ({ id: g, label: groupLabel(g), custom: !GROUPS.some((x) => x.id === g) })),
+      items,
+    },
+  };
+}
+
+/** Devuelve la rutina si el objeto es una rutina compartida válida, o null. */
+export function parseSharedRoutine(obj) {
+  const r = obj?.type === 'routine' ? obj.routine : null;
+  return r && typeof r.name === 'string' && Array.isArray(r.items) && Array.isArray(r.groups) ? r : null;
+}
+
+/** Agrega una rutina compartida sin tocar nada más. Crea los grupos y ejercicios propios que falten. */
+export function importRoutine(shared) {
+  const groupMap = new Map();
+  for (const g of shared.groups) {
+    const local = groups().find((x) => x.id === g.id) ?? (g.custom ? addGroup(g.label) : null);
+    if (local) groupMap.set(g.id, local.id);
+  }
+  const items = [];
+  for (const it of shared.items) {
+    const groupId = groupMap.get(it.exercise?.group) ?? it.exercise?.group;
+    if (!groupId || !it.exercise?.name) continue;
+    let ex = exercise(it.exercise.id);
+    if (!ex || ex.group !== groupId) ex = addExercise(it.exercise.name, groupId); // si ya existe con ese nombre, lo reusa
+    if (!ex) continue;
+    items.push({
+      exerciseId: ex.id,
+      sets: Math.max(1, Number(it.sets) || 3),
+      reps: Math.max(1, Number(it.reps) || 10),
+      ...(Array.isArray(it.repsPerSet) && it.repsPerSet.length ? { repsPerSet: it.repsPerSet.map(Number) } : {}),
+    });
+  }
+  const r = {
+    id: uid(),
+    name: shared.name.trim() || 'Rutina compartida',
+    groups: [...new Set(items.map((it) => exercise(it.exerciseId).group))],
+    items,
+  };
+  saveRoutine(r);
+  return r;
+}
+
 /** Reemplaza todos los datos por los del backup. */
 export function importData(data) {
   state = normalize(JSON.parse(JSON.stringify(data)));
@@ -153,6 +221,16 @@ export function addExercise(name, group) {
   state.exercises.push(ex);
   save();
   return ex;
+}
+
+/** Nota fija del ejercicio (ej. "asiento en 4"). Texto vacío la borra. */
+export function setExerciseNote(id, text) {
+  const ex = exercise(id);
+  if (!ex) return;
+  const clean = text.trim().slice(0, 120);
+  if (clean) ex.note = clean;
+  else delete ex.note;
+  save();
 }
 
 // ---------- Rutinas ----------

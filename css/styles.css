@@ -1572,3 +1572,35 @@ input:focus {
 .content > .segmented {
   margin: 4px 0 14px;
 }
+
+/* ---------- Menú y nota de cada ejercicio (entrenar) ---------- */
+
+.ex-head {
+  position: relative;
+  padding-right: 40px;
+}
+
+.ex-menu {
+  position: absolute;
+  top: -8px;
+  right: -10px;
+  color: var(--muted);
+}
+
+.ex-note {
+  display: block;
+  margin-top: 4px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+  font-size: 14px;
+  color: var(--text);
+}
+
+.ex-note-page {
+  margin: 4px 0 14px;
+}
+
+/* Campo de texto dentro de la hoja (notas) */
+.sheet-body input {
+  margin-bottom: 4px;
+}
