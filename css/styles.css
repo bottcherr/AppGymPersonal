@@ -1637,3 +1637,12 @@ input:focus {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+
+/* Avisos largos: que bajen de renglón en vez de salirse de la pantalla. */
+.toast {
+  white-space: normal;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  text-align: center;
+  border-radius: 18px;
+}

@@ -15,7 +15,7 @@ import {
   suggestedSetsLabel,
   planItem,
   recalcMinutes,
-  additionCandidates,
+  bestAddition,
   INTENSITIES,
   DURATIONS,
 } from './generator.js';
@@ -1682,7 +1682,7 @@ function renderGenerator() {
         return toast(`Quitado: ${store.exercise(removed.exerciseId)?.name ?? 'ejercicio'}`);
       }
       case 'plan-add':
-        return choosePlanAddition();
+        return addToPlan();
       case 'reroll':
         regenerate(3);
         return toast('Otra combinación, mismas zonas');
@@ -1713,32 +1713,14 @@ function renderGenerator() {
   };
 }
 
-/** Agregar un ejercicio a la rutina generada: primero los que cubren zonas que faltan. */
-function choosePlanAddition(groupId = null) {
-  const candidates = additionCandidates(plan, groupId);
-  const add = (ex) => () => {
-    plan.items.push(planItem(plan, ex.id));
-    if (!plan.groups.includes(ex.group)) plan.groups.push(ex.group);
-    recalcMinutes(plan);
-    rerenderKeepingScroll(renderGenerator);
-    toast(`Agregado: ${ex.name}`);
-  };
-  const actions = candidates.map((ex) => ({
-    label: `${ex.name} · ${exerciseZone(ex)}`,
-    run: add(ex),
-  }));
-  if (!groupId) {
-    actions.push({
-      label: 'Elegir de otro grupo…',
-      run: () =>
-        openSheet(
-          'Elegí el grupo',
-          store.groups().map((g) => ({ label: g.label, run: () => choosePlanAddition(g.id) })),
-        ),
-    });
-  }
-  if (!candidates.length && groupId) return toast('Ya están todos los ejercicios de ese grupo');
-  openSheet(groupId ? `Agregar de ${groupLabel(groupId)}` : 'Agregar ejercicio', actions);
+/** Agregar un ejercicio a la rutina generada: la app decide sola (lo que falta, o lo que conviene reforzar). */
+function addToPlan() {
+  const pick = bestAddition(plan);
+  if (!pick) return toast('Ya están todos los ejercicios de estos grupos');
+  plan.items.push(planItem(plan, pick.exercise.id));
+  recalcMinutes(plan);
+  rerenderKeepingScroll(renderGenerator);
+  toast(`Agregado: ${pick.exercise.name}, ${pick.why}`);
 }
 
 /** variety > 0 cambia qué ejercicio va en cada zona; 0 da siempre la misma rutina para las mismas opciones. */

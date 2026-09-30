@@ -326,40 +326,49 @@ export function recalcMinutes(plan) {
 }
 
 /**
- * Ejercicios para agregar. Primero los que cubren zonas que todavía no están en la rutina
- * (en orden de importancia), y dentro de cada zona, los que más hacés.
- * Sin `groupId`: hasta 3 por cada grupo de la rutina. Con `groupId`: todos los de ese grupo.
+ * Elige solo qué ejercicio agregar a la rutina generada. Devuelve { exercise, why } o null.
+ * Orden de prioridad:
+ *   1. Lo que falta: una zona sin cubrir (las zonas chicas, como trapecio o lumbar, van después de las principales,
+ *      y no se repiten si ya llegaron a su máximo).
+ *   2. Lo que conviene reforzar: el grupo con menos ejercicios en la rutina (a igualdad, el principal).
+ *   3. La zona más importante del grupo, y dentro de ella el ejercicio que más hacés.
  */
-export function additionCandidates(plan, groupId = null) {
+export function bestAddition(plan) {
   const history = analyzeHistory();
   const inPlan = new Set(plan.items.map((it) => it.exerciseId));
-  const groups = groupId ? [groupId] : plan.groups;
-  const result = [];
-  for (const g of groups) {
-    const zones = (MUSCLES[g] ?? []).map((m) => m.id);
+  const uses = (ex) => (history.sessionsByExercise.get(ex.id) ?? 0) * 3 + (history.inRoutines.get(ex.id) ?? 0) * 2;
+
+  let best = null;
+  plan.groups.forEach((g, groupIndex) => {
+    const zones = MUSCLES[g] ?? [];
     const covered = new Map();
+    let inGroup = 0;
     for (const it of plan.items) {
       const ex = store.exercise(it.exerciseId);
-      if (ex?.group === g) covered.set(muscleOf(ex), (covered.get(muscleOf(ex)) ?? 0) + 1);
+      if (ex?.group !== g) continue;
+      inGroup++;
+      covered.set(muscleOf(ex), (covered.get(muscleOf(ex)) ?? 0) + 1);
     }
-    const zoneRank = (ex) => {
-      const i = zones.indexOf(muscleOf(ex));
-      return i >= 0 ? i : zones.length;
-    };
-    // Zonas chicas (trapecio, lumbar...) cuentan como "ya cubiertas una vez": van después de las principales.
-    const isMinor = (ex) => (MUSCLES[g] ?? []).some((m) => m.id === muscleOf(ex) && m.max);
-    const need = (ex) => (covered.get(muscleOf(ex)) ?? 0) + (isMinor(ex) ? 1 : 0);
-    const uses = (ex) => (history.sessionsByExercise.get(ex.id) ?? 0) * 3 + (history.inRoutines.get(ex.id) ?? 0) * 2;
-    const list = store
-      .exercisesByGroup(g)
-      .filter((ex) => !inPlan.has(ex.id))
-      .sort(
-        (a, b) =>
-          need(a) - need(b) ||
-          zoneRank(a) - zoneRank(b) ||
-          uses(b) - uses(a),
-      );
-    result.push(...(groupId ? list : list.slice(0, 3)));
-  }
-  return result;
+    for (const ex of store.exercisesByGroup(g)) {
+      if (inPlan.has(ex.id)) continue;
+      const zoneId = muscleOf(ex);
+      const zone = zones.find((m) => m.id === zoneId);
+      const count = covered.get(zoneId) ?? 0;
+      if (zone?.max && count >= zone.max) continue; // zona chica ya completa
+      const zoneRank = zone ? zones.indexOf(zone) : zones.length;
+      const key = [count + (zone?.max ? 1 : 0), inGroup, groupIndex, zoneRank, -uses(ex)];
+      if (!best || compareKeys(key, best.key) < 0) best = { key, ex, count, zone, g };
+    }
+  });
+  if (!best) return null;
+
+  const group = store.groupLabel(best.g).toLowerCase();
+  const zone = best.zone?.label.toLowerCase();
+  const why = best.count === 0 && zone ? `para cubrir ${zone} de ${group}` : `para sumar más ${group}`;
+  return { exercise: best.ex, why };
+}
+
+function compareKeys(a, b) {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
 }
