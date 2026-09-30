@@ -32,7 +32,10 @@ Datos en `localStorage` (clave `appgym.v1`), por dispositivo. No hay servidor.
   (con `muscle` y `compound`), y clasificación de ejercicios propios por palabras clave (`muscleOf`, `isCompound`).
 - `js/generator.js` — "Rutina para hoy": reglas locales, **sin IA ni azar** (el azar solo con `variety` en
   "Otra opción"). Elige bloque Push/Pull/Piernas por lo menos entrenado, reparte ejercicios por rondas entre
-  grupos y zonas, prioriza lo que más hace el usuario y sugiere pesos con Epley.
+  grupos y zonas, prioriza lo que más hace el usuario y sugiere pesos con Epley. Series por ejercicio elegibles
+  (2/3/4); el sugerido en rutina corta es 2 (más ejercicios). Las opciones se recuerdan en `settings.generator`.
+  La rutina generada se puede ajustar: ✕ por ejercicio y "+ Agregar ejercicio" (`additionCandidates()`: primero zonas
+  que faltan; las zonas chicas van después de las principales).
 - `sw.js` — service worker: red primero con `cache: 'no-cache'`, y caché de respaldo para offline.
 - `tools/serve.py` — servidor local sin caché. `tools/make-icons.mjs` — genera los PNG del ícono.
 

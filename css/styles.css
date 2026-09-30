@@ -1604,3 +1604,36 @@ input:focus {
 .sheet-body input {
   margin-bottom: 4px;
 }
+
+/* ---------- Ajustar la rutina generada ---------- */
+
+.plan-remove {
+  width: 36px;
+  height: 36px;
+  margin-right: -8px;
+  color: var(--muted);
+}
+
+.plan-remove svg {
+  width: 16px;
+  height: 16px;
+}
+
+.plan-remove:disabled {
+  opacity: 0.25;
+}
+
+.plan-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+}
+
+/* Hojas con muchas opciones (ej. ejercicios de un grupo): que se puedan desplazar. */
+.sheet-body {
+  max-height: 85dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}

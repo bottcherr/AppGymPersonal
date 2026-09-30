@@ -10,7 +10,15 @@
 //   #/entrenamiento/:id    entrenamiento pasado (corregir o borrar)
 
 import * as store from './store.js';
-import { generatePlan, INTENSITIES, DURATIONS } from './generator.js';
+import {
+  generatePlan,
+  suggestedSetsLabel,
+  planItem,
+  recalcMinutes,
+  additionCandidates,
+  INTENSITIES,
+  DURATIONS,
+} from './generator.js';
 import { muscleLabel, muscleOf, slug } from './data.js';
 
 const groupLabel = (id) => store.groupLabel(id);
@@ -1513,8 +1521,21 @@ function renderPastWorkout(id) {
 
 // ---------- Rutina para hoy (generada) ----------
 
-const genOptions = { intensity: 'heavy', duration: 'medium', focus: [], rest: null }; // rest null = sugerido
+// rest / sets null = sugerido. Se recuerdan entre usos (menos el enfoque, que cambia cada día).
+const genOptions = {
+  intensity: 'heavy',
+  duration: 'medium',
+  rest: null,
+  sets: null,
+  ...store.settings().generator,
+  focus: [],
+};
 let plan = null;
+
+function rememberGenOptions() {
+  const { intensity, duration, rest, sets } = genOptions;
+  store.updateSettings({ generator: { intensity, duration, rest, sets } });
+}
 
 function openGenerator() {
   plan = generatePlan(genOptions);
@@ -1546,6 +1567,15 @@ function renderGenerator() {
       )
       .join('');
 
+  const setsChips =
+    `<button class="chip" data-action="sets-opt" data-value="" aria-pressed="${genOptions.sets == null}">Sugerido · ${suggestedSetsLabel(genOptions.intensity, genOptions.duration)}</button>` +
+    [2, 3, 4]
+      .map(
+        (n) =>
+          `<button class="chip" data-action="sets-opt" data-value="${n}" aria-pressed="${genOptions.sets === n}">${n} series</button>`,
+      )
+      .join('');
+
   const suggestedRest = INTENSITIES[genOptions.intensity].restSeconds;
   const restChips =
     `<button class="chip" data-action="rest-opt" data-value="" aria-pressed="${genOptions.rest == null}">Sugerido · ${fmtRest(suggestedRest)}</button>` +
@@ -1571,6 +1601,10 @@ function renderGenerator() {
         ${segmented('duration', DURATIONS, genOptions.duration)}
       </div>
       <div class="field">
+        <span class="label">Series por ejercicio</span>
+        <div class="chips">${setsChips}</div>
+      </div>
+      <div class="field">
         <span class="label">Descanso entre series</span>
         <div class="chips">${restChips}</div>
       </div>
@@ -1594,11 +1628,15 @@ function renderGenerator() {
                   it.weight != null ? ` · sugerido ${fmtNumber(it.weight)} kg` : ''
                 }</small></span>
                 <span class="plan-sets">${fmtTarget(it.sets, it.reps, it.repsPerSet)}</span>
+                <button class="icon-btn plan-remove" data-action="plan-remove" data-index="${i}" aria-label="Quitar ${esc(ex?.name ?? 'ejercicio')}" ${plan.items.length <= 1 ? 'disabled' : ''}>${ICONS.close}</button>
               </li>`;
             })
             .join('')}
         </ol>
-        <button class="link-btn" data-action="save-plan">${ICONS.plus}Guardar como rutina</button>
+        <div class="plan-actions">
+          <button class="link-btn" data-action="plan-add">${ICONS.plus}Agregar ejercicio</button>
+          <button class="link-btn muted" data-action="save-plan">Guardar como rutina</button>
+        </div>
       </article>
     </main>
     <div class="bottombar bottombar-split">
@@ -1616,12 +1654,18 @@ function renderGenerator() {
         return navigate('/');
       case 'option':
         genOptions[btn.dataset.name] = btn.dataset.value;
+        rememberGenOptions();
         return regenerate();
       case 'focus-auto':
         genOptions.focus = [];
         return regenerate();
       case 'rest-opt':
         genOptions.rest = btn.dataset.value ? Number(btn.dataset.value) : null;
+        rememberGenOptions();
+        return regenerate();
+      case 'sets-opt':
+        genOptions.sets = btn.dataset.value ? Number(btn.dataset.value) : null;
+        rememberGenOptions();
         return regenerate();
       case 'focus': {
         const g = btn.dataset.group;
@@ -1630,6 +1674,15 @@ function renderGenerator() {
           : [...genOptions.focus, g];
         return regenerate();
       }
+      case 'plan-remove': {
+        if (plan.items.length <= 1) return;
+        const [removed] = plan.items.splice(+btn.dataset.index, 1);
+        recalcMinutes(plan);
+        rerenderKeepingScroll(renderGenerator);
+        return toast(`Quitado: ${store.exercise(removed.exerciseId)?.name ?? 'ejercicio'}`);
+      }
+      case 'plan-add':
+        return choosePlanAddition();
       case 'reroll':
         regenerate(3);
         return toast('Otra combinación, mismas zonas');
@@ -1658,6 +1711,34 @@ function renderGenerator() {
       }
     }
   };
+}
+
+/** Agregar un ejercicio a la rutina generada: primero los que cubren zonas que faltan. */
+function choosePlanAddition(groupId = null) {
+  const candidates = additionCandidates(plan, groupId);
+  const add = (ex) => () => {
+    plan.items.push(planItem(plan, ex.id));
+    if (!plan.groups.includes(ex.group)) plan.groups.push(ex.group);
+    recalcMinutes(plan);
+    rerenderKeepingScroll(renderGenerator);
+    toast(`Agregado: ${ex.name}`);
+  };
+  const actions = candidates.map((ex) => ({
+    label: `${ex.name} · ${exerciseZone(ex)}`,
+    run: add(ex),
+  }));
+  if (!groupId) {
+    actions.push({
+      label: 'Elegir de otro grupo…',
+      run: () =>
+        openSheet(
+          'Elegí el grupo',
+          store.groups().map((g) => ({ label: g.label, run: () => choosePlanAddition(g.id) })),
+        ),
+    });
+  }
+  if (!candidates.length && groupId) return toast('Ya están todos los ejercicios de ese grupo');
+  openSheet(groupId ? `Agregar de ${groupLabel(groupId)}` : 'Agregar ejercicio', actions);
 }
 
 /** variety > 0 cambia qué ejercicio va en cada zona; 0 da siempre la misma rutina para las mismas opciones. */

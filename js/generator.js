@@ -23,7 +23,7 @@ export const DURATIONS = {
 };
 
 const WARMUP_MIN = 5;
-const MAX_EXERCISES = 9;
+const MAX_EXERCISES = 10;
 const DAY = 86400000;
 
 // Bloques clásicos. El primer grupo es el principal (lleva más ejercicios).
@@ -163,13 +163,31 @@ function pickForGroup(group, n, scoreOf) {
   return chosen;
 }
 
+/**
+ * Series por ejercicio: { main (el primero), rest (los demás) }.
+ * `chosen` = elegido por el usuario (2, 3 o 4). Sugerido: en rutinas cortas 2 series, así entran más ejercicios;
+ * si no, lo de la intensidad (pesada: 4 en el primero y 3 en el resto).
+ */
+function setsPlan(intensityKey, durationKey, chosen) {
+  const intensity = INTENSITIES[intensityKey];
+  if (chosen) return { main: chosen, rest: chosen };
+  if (durationKey === 'short') return { main: intensityKey === 'heavy' ? 3 : 2, rest: 2 };
+  return { main: intensity.mainSets, rest: intensity.sets };
+}
+
+/** Texto del sugerido para la pantalla, ej. "2" o "3 (4 el primero)". */
+export function suggestedSetsLabel(intensityKey, durationKey) {
+  const { main, rest } = setsPlan(intensityKey, durationKey, null);
+  return main === rest ? `${rest}` : `${rest} (${main} el primero)`;
+}
+
 /** Cuántos ejercicios entran en el tiempo elegido. */
-function exerciseCount(intensity, duration, secsPerSet) {
+function exerciseCount(sets, duration, secsPerSet) {
   const budget = (duration.minutes - WARMUP_MIN) * 60;
-  let used = intensity.mainSets * secsPerSet;
+  let used = sets.main * secsPerSet;
   let count = 1;
-  while (count < MAX_EXERCISES && used + intensity.sets * secsPerSet <= budget) {
-    used += intensity.sets * secsPerSet;
+  while (count < MAX_EXERCISES && used + sets.rest * secsPerSet <= budget) {
+    used += sets.rest * secsPerSet;
     count++;
   }
   return count;
@@ -190,11 +208,20 @@ function suggestWeight(exerciseId, reps, load) {
  * Arma la rutina.
  * options: { intensity: 'light'|'heavy', duration: 'short'|'medium'|'long', focus: [groupId] (vacío = automático),
  *            rest: segundos de descanso, o null = el sugerido por la intensidad,
+ *            sets: series por ejercicio (2, 3 o 4), o null = sugerido,
  *            variety: 0 = siempre la misma rutina; > 0 = cambia el ejercicio de cada zona ("Otra opción") }
  */
-export function generatePlan({ intensity: intensityKey, duration: durationKey, focus = [], rest = null, variety = 0 }) {
+export function generatePlan({
+  intensity: intensityKey,
+  duration: durationKey,
+  focus = [],
+  rest = null,
+  sets: chosenSets = null,
+  variety = 0,
+}) {
   const intensity = INTENSITIES[intensityKey];
   const duration = DURATIONS[durationKey];
+  const setsCount = setsPlan(intensityKey, durationKey, chosenSets);
   const restSeconds = rest ?? intensity.restSeconds;
   const secsPerSet = intensity.workSecs + restSeconds;
   const history = analyzeHistory();
@@ -241,7 +268,7 @@ export function generatePlan({ intensity: intensityKey, duration: durationKey, f
     );
   };
 
-  const alloc = allocate(groups, exerciseCount(intensity, duration, secsPerSet));
+  const alloc = allocate(groups, exerciseCount(setsCount, duration, secsPerSet));
   const picked = [];
   const coverage = [];
   groups.forEach((g, gi) => {
@@ -254,7 +281,7 @@ export function generatePlan({ intensity: intensityKey, duration: durationKey, f
   });
 
   const items = picked.map(({ ex }, i) => {
-    const sets = i === 0 ? intensity.mainSets : intensity.sets;
+    const sets = i === 0 ? setsCount.main : setsCount.rest;
     const reps = i === 0 ? intensity.mainReps : intensity.reps;
     return { exerciseId: ex.id, sets, reps, weight: suggestWeight(ex.id, reps, intensity.load) };
   });
@@ -272,7 +299,67 @@ export function generatePlan({ intensity: intensityKey, duration: durationKey, f
     duration: durationKey,
     groups,
     restSeconds,
+    secsPerSet, // para recalcular el tiempo si se agregan o quitan ejercicios
+    setsRest: setsCount.rest,
     minutes: Math.round(WARMUP_MIN + (totalSets * secsPerSet) / 60),
     items,
   };
+}
+
+// ---------- Ajustar la rutina generada a mano ----------
+
+/** Ítem nuevo para agregar a la rutina generada, con las series, reps y peso sugerido de la intensidad. */
+export function planItem(plan, exerciseId) {
+  const intensity = INTENSITIES[plan.intensity];
+  return {
+    exerciseId,
+    sets: plan.setsRest,
+    reps: intensity.reps,
+    weight: suggestWeight(exerciseId, intensity.reps, intensity.load),
+  };
+}
+
+/** Recalcula el tiempo estimado después de agregar o quitar ejercicios. */
+export function recalcMinutes(plan) {
+  const totalSets = plan.items.reduce((sum, it) => sum + it.sets, 0);
+  plan.minutes = Math.round(WARMUP_MIN + (totalSets * plan.secsPerSet) / 60);
+}
+
+/**
+ * Ejercicios para agregar. Primero los que cubren zonas que todavía no están en la rutina
+ * (en orden de importancia), y dentro de cada zona, los que más hacés.
+ * Sin `groupId`: hasta 3 por cada grupo de la rutina. Con `groupId`: todos los de ese grupo.
+ */
+export function additionCandidates(plan, groupId = null) {
+  const history = analyzeHistory();
+  const inPlan = new Set(plan.items.map((it) => it.exerciseId));
+  const groups = groupId ? [groupId] : plan.groups;
+  const result = [];
+  for (const g of groups) {
+    const zones = (MUSCLES[g] ?? []).map((m) => m.id);
+    const covered = new Map();
+    for (const it of plan.items) {
+      const ex = store.exercise(it.exerciseId);
+      if (ex?.group === g) covered.set(muscleOf(ex), (covered.get(muscleOf(ex)) ?? 0) + 1);
+    }
+    const zoneRank = (ex) => {
+      const i = zones.indexOf(muscleOf(ex));
+      return i >= 0 ? i : zones.length;
+    };
+    // Zonas chicas (trapecio, lumbar...) cuentan como "ya cubiertas una vez": van después de las principales.
+    const isMinor = (ex) => (MUSCLES[g] ?? []).some((m) => m.id === muscleOf(ex) && m.max);
+    const need = (ex) => (covered.get(muscleOf(ex)) ?? 0) + (isMinor(ex) ? 1 : 0);
+    const uses = (ex) => (history.sessionsByExercise.get(ex.id) ?? 0) * 3 + (history.inRoutines.get(ex.id) ?? 0) * 2;
+    const list = store
+      .exercisesByGroup(g)
+      .filter((ex) => !inPlan.has(ex.id))
+      .sort(
+        (a, b) =>
+          need(a) - need(b) ||
+          zoneRank(a) - zoneRank(b) ||
+          uses(b) - uses(a),
+      );
+    result.push(...(groupId ? list : list.slice(0, 3)));
+  }
+  return result;
 }
